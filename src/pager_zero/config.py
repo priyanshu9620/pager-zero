@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     checkpoint_db: Path = Path(".pz/checkpoints.sqlite")
     trace_dir: Path = Path(".pz/traces")
     embedding_model: str = "all-MiniLM-L6-v2"
+    memory_backend: str = Field("pgvector", description="pgvector | memory | off")
+    recall_k: int = 3
+    memory_backend: str = Field("pgvector", description="pgvector | memory | off")
+    recall_k: int = 3
 
 
 settings = Settings()

@@ -251,6 +251,72 @@ def incident_show(incident_id: str) -> None:
             )
 
 
+memory_app = typer.Typer(help="Incident memory (pgvector).")
+app.add_typer(memory_app, name="memory")
+
+
+@memory_app.command("init")
+def memory_init() -> None:
+    """Create the schema and load the seed runbooks."""
+    from pager_zero.memory import get_store
+    from pager_zero.memory.runbooks import RUNBOOKS
+
+    store = get_store()
+    existing = store.count()
+    if existing < 0:
+        console.print("[red]memory backend unreachable — is `docker compose up -d` running?[/red]")
+        raise typer.Exit(code=1)
+    if store.recall("runbook", k=1, kind="runbook"):
+        console.print(f"runbooks already loaded ({existing} memories)")
+        return
+    for rb in RUNBOOKS:
+        store.remember(rb)
+    console.print(
+        f"loaded {len(RUNBOOKS)} runbooks (backend={settings.memory_backend}, total={store.count()})"
+    )
+
+
+@memory_app.command("search")
+def memory_search(query: str, k: int = typer.Option(3, "-k")) -> None:
+    """Semantic search over remembered incidents and runbooks."""
+    from pager_zero.memory import get_store
+
+    for h in get_store().recall(query, k=k):
+        console.print(f"[bold]{h.score:.3f}[/bold] [{h.kind}] {h.title}\n   {h.text[:200]}")
+
+
+@memory_app.command("count")
+def memory_count() -> None:
+    from pager_zero.memory import get_store
+
+    console.print(get_store().count())
+
+
+@app.command("bench")
+def bench(
+    n: int = typer.Option(20, "--n"),
+    seed: int = typer.Option(7, "--seed"),
+    families: str = typer.Option(
+        "", "--families", help="Comma-separated subset of scenario families."
+    ),
+    memory: bool = typer.Option(
+        False,
+        "--memory/--no-memory",
+        help="Let the agent recall past incidents (off = fair, cold-start measurement).",
+    ),
+    pause: float = typer.Option(
+        0.0, "--pause", help="Seconds to wait between incidents (free-tier rate limits)."
+    ),
+) -> None:
+    """Run N synthetic incidents with auto-approval and score root-cause / fix accuracy."""
+    import asyncio
+
+    from pager_zero.bench.runner import run_bench
+
+    fams = [f.strip() for f in families.split(",") if f.strip()] or None
+    asyncio.run(run_bench(n, seed, fams, memory, console, pause_s=pause))
+
+
 # convenience aliases at top level: `pz approve <id>` / `pz reject <id>`
 app.command("approve", hidden=True)(incident_approve)
 app.command("reject", hidden=True)(incident_reject)

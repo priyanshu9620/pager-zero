@@ -22,6 +22,8 @@ from langgraph.types import Command
 
 from pager_zero.agent.graph import build_graph, msg_text, tool_output
 from pager_zero.config import settings
+from pager_zero.memory import get_store
+from pager_zero.memory.store import incident_memory, recall_query
 
 INCIDENTS_DIR = Path(".pz/incidents")
 
@@ -49,9 +51,10 @@ def list_incidents() -> list[dict[str, Any]]:
     )
 
 
-def new_incident(scenario: str, seed: int) -> dict[str, Any]:
+def new_incident(scenario: str, seed: int, memory: bool = True) -> dict[str, Any]:
     iid = f"inc_{uuid.uuid4().hex[:8]}"
     meta = {
+        "memory": memory,
         "id": iid,
         "scenario": scenario,
         "seed": seed,
@@ -108,11 +111,18 @@ async def _graph(meta: dict[str, Any], llm, trace):
                 trace({"event": "execute", "action": action, "target": target, "result": out})
                 return out if isinstance(out, dict) else {"ok": True, "detail": str(out)}
 
+        async def recall(context: dict[str, Any]) -> list[dict[str, Any]]:
+            if not meta.get("memory", True):
+                return []
+            hits = get_store().recall(recall_query(context), k=settings.recall_k)
+            trace({"event": "recall", "hits": [h.public() for h in hits]})
+            return [h.public() for h in hits]
+
         settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
         async with AsyncSqliteSaver.from_conn_string(str(settings.checkpoint_db)) as saver:
-            graph = build_graph(llm, read_tools, executor, max_steps=settings.max_steps).compile(
-                checkpointer=saver
-            )
+            graph = build_graph(
+                llm, read_tools, executor, max_steps=settings.max_steps, recall=recall
+            ).compile(checkpointer=saver)
             yield graph
 
 
@@ -143,8 +153,10 @@ class Tracer:
             )
             self({"event": "triage", "alert": a})
         elif node == "recall":
-            n = len(update.get("recalled") or [])
-            c.print(f"[cyan][recall][/cyan] {n} similar past incident(s)")
+            hits = update.get("recalled") or []
+            c.print(f"[cyan][recall][/cyan] {len(hits)} memory hit(s)")
+            for h in hits:
+                c.print(f"   • [{h['kind']}] {h['title']} (sim {h['similarity']})")
         elif node == "investigate":
             for m in update.get("messages", []):
                 if isinstance(m, AIMessage):
@@ -224,7 +236,21 @@ async def resume(meta: dict[str, Any], decision: dict[str, Any], console) -> dic
         state = await graph.aget_state(cfg)
     meta["status"] = state.values.get("status", "unknown")
     save_meta(meta)
+    _remember(meta, state.values)
     return state.values
+
+
+def _remember(meta: dict[str, Any], values: dict[str, Any]) -> None:
+    """Store the finished incident so future `recall` can find it (only real diagnoses)."""
+    if not meta.get("memory", True) or not values.get("diagnosis"):
+        return
+    if values["diagnosis"].get("family") == "unknown":
+        return
+    get_store().remember(
+        incident_memory(
+            values["context"], values["diagnosis"], values.get("plan"), values.get("verification")
+        )
+    )
 
 
 async def current_state(meta: dict[str, Any]) -> dict[str, Any]:
