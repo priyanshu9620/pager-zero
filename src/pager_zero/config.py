@@ -31,7 +31,12 @@ class Settings(BaseSettings):
         "anthropic", description="LangChain provider id: anthropic|google_genai|groq|ollama|openai"
     )
     llm_model: str = Field("claude-opus-5-5", description="Model id understood by the provider")
-    llm_temperature: float = 0.0
+    llm_temperature: float | None = Field(
+        None, description="Leave unset for models with fixed sampling"
+    )
+    llm_max_retries: int = Field(
+        6, description="SDK-level retries with backoff (free tiers rate-limit hard)"
+    )
 
     # --- agent limits ---
     max_steps: int = Field(12, description="Hard cap on investigate-loop tool calls per incident")

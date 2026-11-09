@@ -153,5 +153,108 @@ def mcp_serve(
     synthetic_server(scenario, seed, state, actions_enabled=actions).run(transport="stdio")
 
 
+incident_app = typer.Typer(help="Run the agent on an incident.")
+app.add_typer(incident_app, name="incident")
+
+
+@incident_app.command("fire")
+def incident_fire(
+    scenario: str = typer.Option("bad-deploy", "--scenario", "-s"),
+    seed: int = typer.Option(1, "--seed"),
+) -> None:
+    """Generate a synthetic incident and run the agent until it needs approval."""
+    import asyncio
+
+    from rich.panel import Panel
+
+    from pager_zero.agent.runner import new_incident, run_until_approval
+
+    meta = new_incident(scenario, seed)
+    console.print(
+        f"▶ incident [bold]{meta['id']}[/bold]  scenario={scenario} seed={seed}  "
+        f"model={settings.llm_provider}/{settings.llm_model}"
+    )
+    state = asyncio.run(run_until_approval(meta, console))
+    status = state.get("status")
+    if status == "awaiting_approval":
+        console.print(
+            Panel(
+                f"pz approve {meta['id']}        apply the proposed fix\n"
+                f"pz reject  {meta['id']} --reason '...'",
+                title="⏸  approval required",
+                border_style="yellow",
+            )
+        )
+    else:
+        console.print(f"[yellow]finished with status={status} (no fix proposed)[/yellow]")
+
+
+def _decide(incident_id: str, decision: str, note: str) -> None:
+    import asyncio
+
+    from pager_zero.agent.runner import load_meta, resume
+
+    meta = load_meta(incident_id)
+    if meta["status"] != "awaiting_approval":
+        console.print(f"[red]{incident_id} is {meta['status']}, not awaiting approval[/red]")
+        raise typer.Exit(code=1)
+    state = asyncio.run(resume(meta, {"decision": decision, "note": note}, console))
+    console.print(f"[bold]{incident_id}[/bold] → {state.get('status')}")
+
+
+@incident_app.command("approve")
+def incident_approve(incident_id: str, note: str = typer.Option("", "--note")) -> None:
+    """Approve the proposed fix: execute it and verify recovery."""
+    _decide(incident_id, "approve", note)
+
+
+@incident_app.command("reject")
+def incident_reject(incident_id: str, reason: str = typer.Option("", "--reason")) -> None:
+    """Reject the proposed fix; the incident is left for a human."""
+    _decide(incident_id, "reject", reason)
+
+
+@incident_app.command("list")
+def incident_list() -> None:
+    """List incidents and their status."""
+    from pager_zero.agent.runner import list_incidents
+
+    t = Table()
+    for col in ("id", "scenario", "seed", "status", "model", "created"):
+        t.add_column(col)
+    for m in list_incidents():
+        t.add_row(
+            m["id"],
+            m["scenario"],
+            str(m["seed"]),
+            m["status"],
+            f"{m['provider']}/{m['model']}",
+            m["created"],
+        )
+    console.print(t)
+
+
+@incident_app.command("show")
+def incident_show(incident_id: str) -> None:
+    """Show diagnosis / plan / result for an incident."""
+    import asyncio
+    import json
+
+    from pager_zero.agent.runner import current_state, load_meta
+
+    meta = load_meta(incident_id)
+    st = asyncio.run(current_state(meta))
+    for key in ("status", "steps", "diagnosis", "plan", "approval", "execution", "verification"):
+        if key in st:
+            console.print(
+                f"[bold]{key}[/bold]: {json.dumps(st[key], indent=1, default=str) if isinstance(st[key], dict) else st[key]}"
+            )
+
+
+# convenience aliases at top level: `pz approve <id>` / `pz reject <id>`
+app.command("approve", hidden=True)(incident_approve)
+app.command("reject", hidden=True)(incident_reject)
+
+
 if __name__ == "__main__":
     app()

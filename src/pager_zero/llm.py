@@ -11,6 +11,7 @@ Rules the rest of the codebase follows so this stays true (notes D-3):
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -29,8 +30,7 @@ PROVIDER_KEY_ENV: dict[str, str | None] = {
 
 @lru_cache(maxsize=1)
 def get_llm() -> BaseChatModel:
-    return init_chat_model(
-        settings.llm_model,
-        model_provider=settings.llm_provider,
-        temperature=settings.llm_temperature,
-    )
+    kwargs: dict[str, Any] = {"max_retries": settings.llm_max_retries}  # SDKs back off on 429/5xx
+    if settings.llm_temperature is not None:
+        kwargs["temperature"] = settings.llm_temperature
+    return init_chat_model(settings.llm_model, model_provider=settings.llm_provider, **kwargs)

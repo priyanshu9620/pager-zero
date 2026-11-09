@@ -20,7 +20,7 @@ Pager-Zero is provider-agnostic. Change two lines in `.env`:
 | Provider | `LLM_PROVIDER` | `LLM_MODEL` (example) | Key |
 |---|---|---|---|
 | Anthropic | `anthropic` | `claude-opus-5-5` | `ANTHROPIC_API_KEY` |
-| Google AI Studio | `google_genai` | `gemini-3.8-flash` | `GOOGLE_API_KEY` |
+| Google AI Studio | `google_genai` | `gemini-3.5-flash-lite` | `GOOGLE_API_KEY` |
 | Groq | `groq` | `openai/gpt-oss-120b` | `GROQ_API_KEY` |
 | Ollama (local) | `ollama` | `qwen2.5:14b` | none |
 

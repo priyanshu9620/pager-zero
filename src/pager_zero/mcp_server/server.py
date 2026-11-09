@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -65,6 +66,14 @@ def _series_summary(s: Series, max_points: int = 16) -> dict[str, Any]:
     }
 
 
+def _items(items: list[Any], empty_note: str = "none") -> dict[str, Any]:
+    """Lists are wrapped: some providers reject empty-list tool results, and a count helps the model."""
+    out: dict[str, Any] = {"count": len(items), "items": items}
+    if not items:
+        out["note"] = empty_note
+    return out
+
+
 # ------------------------------------------------------------------ server factory
 
 
@@ -73,6 +82,8 @@ def build_server(
     *,
     actions_enabled: bool = False,
     on_mutation: Any = None,
+    on_read: Any = None,
+    now_fn: Any = None,
     incident: dict[str, Any] | None = None,
 ) -> FastMCP:
     """Create the MCP server.
@@ -80,13 +91,28 @@ def build_server(
     `incident` is what `incident_context` returns (alert, now, window). For the synthetic backend
     it comes from the World; for live backends from the triggering alert payload.
     `on_mutation()` is called after every successful mutating tool (used to persist state).
+    `on_read()` is called before every read tool (used to reload state another process changed).
+    `now_fn()` returns the current time of the observed system (synthetic worlds have their own clock).
     """
-    mcp = FastMCP("pager-zero", instructions=INSTRUCTIONS)
+    mcp = FastMCP("pager-zero", instructions=INSTRUCTIONS, log_level="WARNING")
     A = adapters
     inc = incident or {}
 
     def now() -> datetime:
+        if now_fn:
+            return now_fn()
         return datetime.fromisoformat(inc["now"]) if "now" in inc else datetime.now().astimezone()
+
+    def read_tool(fn: Any) -> Any:
+        """Register a read-only tool that first refreshes state from disk (D-24)."""
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            if on_read:
+                on_read()
+            return fn(*args, **kwargs)
+
+        return mcp.tool(annotations=READ)(wrapper)
 
     def since(minutes: int) -> tuple[datetime, datetime]:
         n = now()
@@ -94,16 +120,17 @@ def build_server(
 
     # ---------------- orientation
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def incident_context() -> dict[str, Any]:
         """The alert that fired, the current time, the observation window, and the services that exist. Call this first."""
         return {
             **inc,
+            "now": now().isoformat(timespec="seconds"),
             "services": A.topology.services(),
             "hint": "Correlate the alert onset with deploys, flag changes, lag, cache and dependency health. Absence of a change is evidence too.",
         }
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def service_info(service: str) -> dict[str, Any]:
         """Topology for one service: current version, replicas, dependencies, consumer groups, caches, tables, flags."""
         return {
@@ -119,15 +146,17 @@ def build_server(
 
     # ---------------- metrics & logs
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def query_metrics(
         metric: str, labels: dict[str, str] | None = None, minutes: int = 30
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Time series for a metric over the last N minutes, filtered by labels (e.g. {"service": "checkout-api"}). Returns stats, first deviation time and a downsampled trace per matching series."""
         start, end = since(minutes)
-        return [_series_summary(s) for s in A.metrics.query_range(metric, labels or {}, start, end)]
+        return _items(
+            [_series_summary(s) for s in A.metrics.query_range(metric, labels or {}, start, end)]
+        )
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def search_logs(
         service: str, query: str = "", minutes: int = 30, limit: int = 20
     ) -> dict[str, Any]:
@@ -153,45 +182,51 @@ def build_server(
 
     # ---------------- change sources
 
-    @mcp.tool(annotations=READ)
-    def recent_deploys(service: str, minutes: int = 180) -> list[dict[str, Any]]:
+    @read_tool
+    def recent_deploys(service: str, minutes: int = 180) -> dict[str, Any]:
         """Deploys of a service in the last N minutes (version, previous version, time, commit)."""
         start, _ = since(minutes)
-        return _j(A.deploys.recent_deploys(service, start))
+        return _items(_j(A.deploys.recent_deploys(service, start)), "no deploys in this window")
 
-    @mcp.tool(annotations=READ)
-    def recent_commits(service: str, hours: int = 24) -> list[dict[str, Any]]:
+    @read_tool
+    def recent_commits(service: str, hours: int = 24) -> dict[str, Any]:
         """Commits to a service's repo in the last N hours (sha, message, files). Use get_diff for the code."""
         start = now() - timedelta(hours=hours)
-        return [
-            {k: v for k, v in _j(c).items() if k != "diff"}
-            for c in A.scm.recent_commits(service, start)
-        ]
+        return _items(
+            [
+                {k: v for k, v in _j(c).items() if k != "diff"}
+                for c in A.scm.recent_commits(service, start)
+            ],
+            "no commits in this window",
+        )
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def get_diff(sha: str) -> str:
         """The unified diff of one commit."""
         return A.scm.diff(sha)
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def get_flag(key: str) -> dict[str, Any]:
         """Current value of a dynamic config flag."""
         return {"key": key, "value": A.flags.get(key)}
 
-    @mcp.tool(annotations=READ)
-    def flag_history(key: str, hours: int = 24) -> list[dict[str, Any]]:
+    @read_tool
+    def flag_history(key: str, hours: int = 24) -> dict[str, Any]:
         """Changes to a flag in the last N hours (old → new, when, by whom)."""
-        return _j(A.flags.flag_history(key, now() - timedelta(hours=hours)))
+        return _items(
+            _j(A.flags.flag_history(key, now() - timedelta(hours=hours))),
+            "flag unchanged in this window",
+        )
 
     # ---------------- messaging
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def consumer_lag(group: str) -> dict[str, Any]:
         """Current lag of a consumer group: members, per-partition lag, total."""
         lag = A.messaging.consumer_lag(group)
         return {**_j(lag), "total": lag.total}
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def lag_history(group: str, minutes: int = 30) -> dict[str, Any]:
         """Consumer-group total lag over the last N minutes."""
         start, end = since(minutes)
@@ -199,12 +234,12 @@ def build_server(
 
     # ---------------- cache
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def cache_stats(name: str) -> dict[str, Any]:
         """Current snapshot of a cache: max memory, used, hit rate, evictions/s, key count."""
         return _j(A.cache.snapshot(name))
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def cache_history(name: str, metric: str = "hit_rate", minutes: int = 30) -> dict[str, Any]:
         """Cache metric over time. metric ∈ {hit_rate, used_mb, evictions}."""
         start, end = since(minutes)
@@ -212,20 +247,22 @@ def build_server(
 
     # ---------------- datastore
 
-    @mcp.tool(annotations=READ)
-    def hot_keys(table: str, top: int = 5) -> list[dict[str, Any]]:
+    @read_tool
+    def hot_keys(table: str, top: int = 5) -> dict[str, Any]:
         """Keys taking the largest share of a table's traffic right now."""
-        return _j(A.datastore.hot_keys(table, top))
+        return _items(_j(A.datastore.hot_keys(table, top)))
 
-    @mcp.tool(annotations=READ)
-    def partition_latency(table: str, minutes: int = 30) -> list[dict[str, Any]]:
+    @read_tool
+    def partition_latency(table: str, minutes: int = 30) -> dict[str, Any]:
         """p99 latency per shard/partition of a table over the last N minutes."""
         start, end = since(minutes)
-        return [_series_summary(s) for s in A.datastore.partition_latency(table, start, end)]
+        return _items(
+            [_series_summary(s) for s in A.datastore.partition_latency(table, start, end)]
+        )
 
     # ---------------- dependencies
 
-    @mcp.tool(annotations=READ)
+    @read_tool
     def dependency_health(service: str, minutes: int = 30) -> dict[str, Any]:
         """Error rate of each dependency as seen from this service over the last N minutes."""
         start, end = since(minutes)
@@ -295,16 +332,33 @@ def synthetic_server(
     world = load_world(state) if state and state.exists() else generate(scenario, seed)
     if state and not state.exists():
         save_world(world, state)
-    adapters = SyntheticAdapters.from_settings(world=world)
+    impl = SyntheticAdapters(world)
+    adapters = Adapters(*([impl] * 10))
+    stamp = {"v": state.stat().st_mtime_ns if state else 0}
+
+    def refresh() -> None:
+        """Another process (e.g. the actions session) may have mutated/healed the world."""
+        if not state or not state.exists():
+            return
+        m = state.stat().st_mtime_ns
+        if m != stamp["v"]:
+            impl.world = load_world(state)
+            stamp["v"] = m
+
+    def persist() -> None:
+        save_world(impl.world, state)
+        stamp["v"] = state.stat().st_mtime_ns
+
     incident = {
         "incident_id": world.alert.id,
         "alert": _j(world.alert),
-        "now": world.now.isoformat(timespec="seconds"),
         "window_minutes": int(world.window.total_seconds() // 60),
     }
     return build_server(
         adapters,
         actions_enabled=actions_enabled,
-        on_mutation=(lambda: save_world(world, state)) if state else None,
+        on_mutation=persist if state else None,
+        on_read=refresh if state else None,
+        now_fn=lambda: impl.world.now,
         incident=incident,
     )
