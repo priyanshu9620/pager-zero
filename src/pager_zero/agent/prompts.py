@@ -29,6 +29,10 @@ Alerting service topology:
 
 DIAGNOSE_SYSTEM = """You are summarising a completed investigation into a structured diagnosis.
 Use ONLY what the transcript shows. Quote concrete numbers and timestamps in `evidence`.
+`family` classifies the TRIGGER (what changed), not the symptom: a flag flip that caused a cache-miss
+storm is "flag-regression"; a cache that simply outgrew its memory limit is "cache-eviction"; a
+dependency failing is "downstream-outage" even though the caller shows errors. Name the specific
+culprit (version, commit, flag key, consumer group, cache, key, dependency) in `root_cause`.
 If the evidence is insufficient, set family="unknown" and a low confidence — do not guess."""
 
 PLAN_SYSTEM = """You turn a diagnosis into ONE concrete remediation from this catalogue:

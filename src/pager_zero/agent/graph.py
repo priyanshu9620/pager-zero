@@ -49,9 +49,12 @@ async def _call(tools: dict[str, BaseTool], name: str, args: dict[str, Any]) -> 
     return tool_output(await tools[name].ainvoke(args))
 
 
+_TYPE_HINT = {"str": "str", "int": "int", "auto": "the flag's previous value (bool/int/str)"}
+
+
 def _catalogue() -> str:
     return "\n".join(
-        f"- {a}({', '.join(f'{k}: {t}' for k, t in sig.items())})"
+        f"- {a}({', '.join(f'{k}: {_TYPE_HINT[t]}' for k, t in sig.items())})"
         for a, sig in ACTION_SIGNATURES.items()
     )
 
