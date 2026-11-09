@@ -29,7 +29,7 @@ services:
     image: redis:7.4.2-alpine
     container_name: pager-zero-redis
     profiles: ["live"]
-    ports: ["6379:6379"]
+    ports: ["6380:6379"]  # 6380 on the host: avoids clashing with a locally installed redis
     command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
   redpanda:
     image: redpandadata/redpanda:v24.3.3

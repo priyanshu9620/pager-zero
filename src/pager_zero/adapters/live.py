@@ -164,17 +164,20 @@ class KafkaMessaging:
 
     def consumer_lag(self, group: str) -> ConsumerLag:
         admin, make_consumer = self._clients()
-        committed = admin.list_consumer_group_offsets(group)  # {TopicPartition: OffsetAndMetadata}
+        # kafka-python 3.x: {group: {TopicPartition: OffsetAndMetadata}}
+        committed = admin.list_group_offsets({group: None}).get(group, {})
+        if not committed:
+            return ConsumerLag(group, "", 0, {})
         consumer = make_consumer()
         ends = consumer.end_offsets(list(committed))
         per = {tp.partition: max(0, ends[tp] - om.offset) for tp, om in committed.items()}
-        topic = next(iter(committed)).topic if committed else ""
+        topic = next(iter(committed)).topic
         members = 0
         try:
-            desc = admin.describe_consumer_groups([group])
-            members = len(desc[0].members) if desc else 0
+            desc = admin.describe_groups([group])  # {group: {..., "members": [...]}}
+            members = len((desc.get(group) or {}).get("members", []))
         except Exception as e:  # noqa: BLE001
-            log.debug("describe_consumer_groups failed: %s", e)
+            log.debug("describe_groups failed: %s", e)
         return ConsumerLag(group, topic, members, per)
 
     def lag_history(self, group: str, start: datetime, end: datetime) -> Series:
@@ -422,9 +425,7 @@ class DryRunActuator:
         self.log: list[dict[str, Any]] = []
 
     def _rec(self, action: str, target: dict[str, Any], detail: str) -> ActionResult:
-        self.log.append(
-            {"action": action, "target": target, "at": datetime.now(UTC).isoformat()}
-        )
+        self.log.append({"action": action, "target": target, "at": datetime.now(UTC).isoformat()})
         prefix = "DRY-RUN (not applied): " if self.dry_run else ""
         log.warning("%s%s %s", prefix, action, target)
         return ActionResult(True, action, target, prefix + detail)

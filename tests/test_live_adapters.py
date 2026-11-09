@@ -91,11 +91,16 @@ def test_kafka_lag_from_offsets():
     OM = namedtuple("OM", "offset")
 
     class FakeAdmin:
-        def list_consumer_group_offsets(self, group):
-            return {TP("order-events", 0): OM(100), TP("order-events", 1): OM(90)}
+        def list_group_offsets(self, specs):
+            return {
+                "order-events-consumer": {
+                    TP("order-events", 0): OM(100),
+                    TP("order-events", 1): OM(90),
+                }
+            }
 
-        def describe_consumer_groups(self, groups):
-            return [namedtuple("D", "members")(members=[1, 2, 3])]
+        def describe_groups(self, groups):
+            return {"order-events-consumer": {"members": [1, 2, 3]}}
 
     class FakeConsumer:
         def end_offsets(self, tps):
