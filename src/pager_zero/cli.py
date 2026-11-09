@@ -317,6 +317,18 @@ def bench(
     asyncio.run(run_bench(n, seed, fams, memory, console, pause_s=pause))
 
 
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    reload: bool = typer.Option(False, "--reload"),
+) -> None:
+    """Run the HTTP API (FastAPI). Docs at /docs."""
+    import uvicorn
+
+    uvicorn.run("pager_zero.api.app:app", host=host, port=port, reload=reload)
+
+
 # convenience aliases at top level: `pz approve <id>` / `pz reject <id>`
 app.command("approve", hidden=True)(incident_approve)
 app.command("reject", hidden=True)(incident_reject)
