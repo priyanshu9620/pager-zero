@@ -187,3 +187,37 @@ async def test_step_cap_forces_diagnosis(tmp_path):
     assert result["steps"] == 4
     assert result["diagnosis"]["family"] == "unknown"
     assert result["plan"] is None and result["status"] == "unresolved"
+
+
+async def test_current_state_reads_sqlite_checkpoint(tmp_path, monkeypatch):
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from pager_zero.agent import runner
+    from pager_zero.config import settings
+
+    monkeypatch.setattr(settings, "checkpoint_db", tmp_path / "cp.sqlite")
+    ro = synthetic_server("bad-deploy", 42, None, actions_enabled=False)
+    read_tools = await _tools_from_server(ro)
+    diag = Diagnosis(family="bad-deploy", root_cause="x", confidence=0.9, evidence=[])
+    plan = FixPlan(
+        action="rollback_deploy",
+        args=[{"key": "service", "value": "checkout-api"}, {"key": "to_version", "value": "v1.59"}],
+        rationale="r",
+        risk="low",
+        blast_radius="b",
+    )
+    llm = ScriptedLLM(
+        script=[AIMessage(content="done")], structured={"Diagnosis": diag, "FixPlan": plan}
+    )
+
+    async def executor(a, t):
+        return {"ok": True}
+
+    async with AsyncSqliteSaver.from_conn_string(str(settings.checkpoint_db)) as saver:
+        graph = build_graph(llm, read_tools, executor, max_steps=3).compile(checkpointer=saver)
+        await graph.ainvoke({"incident_id": "t3"}, {"configurable": {"thread_id": "t3"}})
+
+    st = await runner.current_state({"id": "t3"})
+    assert st["status"] == "awaiting_approval" and st["plan"]["action"] == "rollback_deploy"
+    assert st["diagnosis"]["family"] == "bad-deploy" and "messages" in st
+    assert await runner.current_state({"id": "nope"}) == {}

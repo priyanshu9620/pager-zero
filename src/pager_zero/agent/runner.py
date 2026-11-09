@@ -253,14 +253,28 @@ def _remember(meta: dict[str, Any], values: dict[str, Any]) -> None:
     )
 
 
+STATE_KEYS = (
+    "incident_id",
+    "context",
+    "service_info",
+    "recalled",
+    "messages",
+    "steps",
+    "diagnosis",
+    "plan",
+    "approval",
+    "execution",
+    "verification",
+    "status",
+)
+
+
 async def current_state(meta: dict[str, Any]) -> dict[str, Any]:
+    """Read the latest checkpoint for an incident without building a graph."""
     settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(str(settings.checkpoint_db)) as saver:
-        from langgraph.graph import StateGraph
-
-        from pager_zero.agent.state import AgentState
-
-        # a trivial compiled graph is enough to read a checkpoint by thread id
-        g = StateGraph(AgentState).compile(checkpointer=saver)
-        snap = await g.aget_state({"configurable": {"thread_id": meta["id"]}})
-        return snap.values
+        tup = await saver.aget_tuple({"configurable": {"thread_id": meta["id"]}})
+        if tup is None:
+            return {}
+        values = tup.checkpoint.get("channel_values", {})
+        return {k: values[k] for k in STATE_KEYS if k in values}

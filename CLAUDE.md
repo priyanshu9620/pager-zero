@@ -13,7 +13,7 @@ progress and problems. Update those files as you work (rules in that folder's RE
 - Mutating tools are reachable only after the LangGraph approval `interrupt()`.
 - Nothing from any employer: no internal service/library/flag names, no real incident data.
 - Pin exact dependency versions (`==`) in `pyproject.toml`.
-- CLI first; web UI is deferred.
+- CLI + web approval console (`/ui`, static HTML/JS served by FastAPI — no frontend toolchain).
 
 ## Commands
 `uv sync` · `uv run pz …` · `make test` · `make lint` · `make fmt`

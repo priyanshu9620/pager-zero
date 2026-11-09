@@ -162,6 +162,15 @@ pz bench --n 20 --seed 7 [--families a,b] [--memory] [--pause s]
 pz serve [--port 8000]                     FastAPI (docs at /docs)
 ```
 
+## Web approval console
+
+```bash
+uv run pz serve            # then open http://127.0.0.1:8000/ui
+```
+
+Fire an incident, watch the tool calls stream in, read the diagnosis and the proposed fix, and click
+**Approve & execute** or **Reject**. One static page served by the API — no build step.
+
 ## HTTP API
 
 ```
