@@ -6,6 +6,8 @@ Sub-commands are added phase by phase (see notes BUILD-PLAN.md). Phase 0 ships `
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -121,6 +123,34 @@ def world_show(
                 border_style="red",
             )
         )
+
+
+mcp_app = typer.Typer(help="Run the MCP tool server.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    scenario: str = typer.Option("bad-deploy", "--scenario", "-s"),
+    seed: int = typer.Option(1, "--seed"),
+    state: Path | None = typer.Option(
+        None, "--state", help="Persist the world here so other processes see mutations."
+    ),
+    actions: bool = typer.Option(
+        False, "--actions", help="Expose mutating tools. Off by default (D-12)."
+    ),
+) -> None:
+    """Serve incident tools over stdio (synthetic backend). Point any MCP client at this.
+
+    Example Claude Code config:  {"command": "uv", "args": ["run", "pz", "mcp", "serve"]}
+    """
+    from pager_zero.config import AdapterBackend, settings
+    from pager_zero.mcp_server.server import synthetic_server
+
+    if settings.adapter_backend is not AdapterBackend.synthetic:
+        console.print("[red]live backend not implemented yet (phase 7)[/red]", file=sys.stderr)
+        raise typer.Exit(code=2)
+    synthetic_server(scenario, seed, state, actions_enabled=actions).run(transport="stdio")
 
 
 if __name__ == "__main__":

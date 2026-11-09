@@ -55,6 +55,9 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]  # formatter owns code width; long message strings are fine
 
+[tool.ruff.lint.per-file-ignores]
+"src/pager_zero/cli.py" = ["B008"]  # typer.Option in defaults is the Typer idiom
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

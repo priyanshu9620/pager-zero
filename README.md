@@ -39,3 +39,14 @@ src/pager_zero/
   bench/         benchmark runner + scoring                       (phase 5)
   api/           FastAPI                                          (phase 6)
 ```
+
+## Drive the tools yourself (any MCP client)
+
+The investigation tools are a standard MCP server. From Claude Code, for example:
+
+```bash
+claude mcp add pager-zero -- uv --directory ~/Desktop/pager-zero run pz mcp serve --scenario cache-eviction --seed 7
+```
+
+Then ask: *"Call incident_context and find the root cause."* Mutating tools are not exposed unless
+you start the server with `--actions` — by design the agent only does that after a human approves.
