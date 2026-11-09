@@ -43,6 +43,14 @@ async def _settle():
             await asyncio.wait_for(t, 5)
 
 
+async def test_ui_is_served(client):
+    async with client as c:
+        r = await c.get("/ui")
+        assert r.status_code == 200 and "Pager-Zero" in r.text and "/incidents" in r.text
+        r = await c.get("/", follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"] == "/ui"
+
+
 async def test_health_and_scenarios(client):
     async with client as c:
         r = await c.get("/healthz")

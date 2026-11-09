@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
@@ -19,6 +21,21 @@ app = FastAPI(
     version=__version__,
     description="LLM on-call agent: diagnoses an incident, prepares the fix, waits for a human.",
 )
+
+STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse("/ui")
+
+
+@app.get("/ui", include_in_schema=False)
+def ui() -> FileResponse:
+    """The approval console: fire incidents, watch the investigation, approve or reject."""
+    return FileResponse(STATIC / "index.html")
+
 
 _quiet = Console(quiet=True)
 _running: dict[str, asyncio.Task[Any]] = {}  # incident id -> background task
