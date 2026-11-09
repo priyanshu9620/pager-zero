@@ -75,9 +75,17 @@ async def run_bench(
         f"bench: {n} incidents, seed {seed}, model {settings.llm_provider}/{settings.llm_model}, memory={'on' if memory else 'off'}"
     )
     scores: list[Score] = []
+    consecutive_errors = 0
     for i, (scenario, inc_seed) in enumerate(plan, 1):
         s = await run_one(scenario, inc_seed, memory)
         scores.append(s)
+        consecutive_errors = consecutive_errors + 1 if s.error else 0
+        if consecutive_errors >= 3:
+            console.print(
+                f"[red]aborting: 3 consecutive infrastructure errors (last: {s.error}). "
+                "Results are NOT written — fix the cause (quota? docker?) and re-run.[/red]"
+            )
+            return {"aborted": True, "incidents": [x.as_dict() for x in scores]}
         mark = lambda b: "[green]✔[/green]" if b else "[red]✘[/red]"  # noqa: E731
         console.print(
             f"{i:>3}/{n} {scenario:<18} seed={inc_seed:<6} rca {mark(s.root_cause_ok)} culprit {mark(s.culprit_ok)} "
