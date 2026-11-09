@@ -64,5 +64,64 @@ def doctor(
         console.print(f"model says: [green]{resp.content!s:.60}[/green]")
 
 
+world_app = typer.Typer(help="Inspect synthetic incident worlds.")
+app.add_typer(world_app, name="world")
+
+
+@world_app.command("list")
+def world_list() -> None:
+    """List scenario families."""
+    from pager_zero.synth import list_scenarios
+
+    for s in list_scenarios():
+        console.print(s)
+
+
+@world_app.command("show")
+def world_show(
+    scenario: str = typer.Option("bad-deploy", "--scenario", "-s"),
+    seed: int = typer.Option(1, "--seed"),
+    truth: bool = typer.Option(False, "--truth", help="Also reveal the hidden ground truth."),
+    logs: int = typer.Option(8, help="How many of the most recent log lines to show."),
+) -> None:
+    """Generate a world and print what the agent would be able to see."""
+    import json
+
+    from rich.panel import Panel
+
+    from pager_zero.synth import generate
+
+    w = generate(scenario, seed)
+    a = w.alert
+    console.print(
+        Panel(
+            f"[bold]{a.name}[/bold]  service={a.service}  severity={a.severity}\n{a.summary}\n"
+            f"fired {a.fired_at:%H:%M:%S}   now {w.now:%H:%M:%S}   window {int(w.window.total_seconds() // 60)}m",
+            title=f"alert {a.id}  ({scenario} / seed {seed})",
+        )
+    )
+    console.print_json(json.dumps(w.public_summary(), default=str))
+    if logs:
+        t = Table(title=f"last {logs} log lines ({len(w.logs)} total)")
+        t.add_column("ts"), t.add_column("service"), t.add_column("level"), t.add_column("message")
+        for line in w.logs[-logs:]:
+            t.add_row(f"{line.ts:%H:%M:%S}", line.service, line.level, line.message[:90])
+        console.print(t)
+    if truth:
+        g = w.ground_truth
+        console.print(
+            Panel(
+                f"[bold]{g.cause}[/bold]\nculprit: {g.culprit}\nfix: {g.fix_action}({g.fix_target})"
+                + (
+                    f"\nalso accepted: {g.acceptable_alternatives}"
+                    if g.acceptable_alternatives
+                    else ""
+                ),
+                title="GROUND TRUTH (hidden from the agent)",
+                border_style="red",
+            )
+        )
+
+
 if __name__ == "__main__":
     app()
