@@ -4,7 +4,7 @@ sync:
 	uv sync
 
 test:
-	uv run pytest -q
+	MEMORY_BACKEND=memory uv run pytest -q -p no:warnings
 
 lint:
 	uv run ruff check src tests
