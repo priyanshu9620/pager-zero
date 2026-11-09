@@ -1,0 +1,17 @@
+{
+  "services": {
+    "checkout-api": {
+      "repo": "your-org/checkout-api",
+      "dependencies": ["order-service", "pricing-service", "payment-gateway"],
+      "caches": ["checkout-session-cache"],
+      "flags": ["checkout.fallback_pricing.enabled", "checkout.cart_cache.ttl_seconds"]
+    },
+    "order-service": {
+      "repo": "your-org/order-service",
+      "dependencies": ["inventory-service"],
+      "consumer_groups": ["order-events-consumer"],
+      "tables": ["orders_by_user"],
+      "flags": ["orders.batch_size", "orders.retry.enabled"]
+    }
+  }
+}

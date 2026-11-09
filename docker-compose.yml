@@ -16,5 +16,30 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---- optional "live" profile: real infra for the live adapters -----------------------
+  #   docker compose --profile live up -d
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: pager-zero-prometheus
+    profiles: ["live"]
+    ports: ["9090:9090"]
+    volumes:
+      - ./live/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  redis:
+    image: redis:7.4.2-alpine
+    container_name: pager-zero-redis
+    profiles: ["live"]
+    ports: ["6379:6379"]
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+  redpanda:
+    image: redpandadata/redpanda:v24.3.3
+    container_name: pager-zero-redpanda
+    profiles: ["live"]
+    ports: ["9092:9092"]
+    command:
+      - redpanda start --overprovisioned --smp 1 --memory 512M --reserve-memory 0M --node-id 0 --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+
 volumes:
   pz-pgdata:

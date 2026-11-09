@@ -10,3 +10,6 @@ wheels/
 .venv
 .env
 .pz/
+live/topology.json
+live/deploys.json
+live/flags.json

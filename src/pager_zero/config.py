@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     kafka_bootstrap: str = "localhost:9092"
     redis_url: str = "redis://localhost:6379/0"
     github_token: str | None = None
+    loki_url: str | None = None
+    live_topology_file: Path = Path("live/topology.json")
+    live_deploy_log: Path = Path("live/deploys.json")
+    live_flag_file: Path = Path("live/flags.json")
+    actuator_dry_run: bool = Field(
+        True, description="Live actuator only logs actions unless explicitly False"
+    )
 
     # --- storage ---
     database_url: str = "postgresql+psycopg://pz:pz@localhost:5432/pagerzero"

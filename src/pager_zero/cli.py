@@ -139,18 +139,32 @@ def mcp_serve(
     actions: bool = typer.Option(
         False, "--actions", help="Expose mutating tools. Off by default (D-12)."
     ),
+    alert_service: str = typer.Option("", help="live backend: alerting service"),
+    alert_name: str = typer.Option("HighLatencyP99", help="live backend: alert name"),
+    alert_summary: str = typer.Option("", help="live backend: alert summary"),
 ) -> None:
-    """Serve incident tools over stdio (synthetic backend). Point any MCP client at this.
+    """Serve incident tools over stdio. Point any MCP client at this.
 
-    Example Claude Code config:  {"command": "uv", "args": ["run", "pz", "mcp", "serve"]}
+    Backend is chosen by ADAPTER_BACKEND (synthetic | live). Example Claude Code config:
+    {"command": "uv", "args": ["run", "pz", "mcp", "serve"]}
     """
     from pager_zero.config import AdapterBackend, settings
-    from pager_zero.mcp_server.server import synthetic_server
+    from pager_zero.mcp_server.server import build_server, synthetic_server
 
-    if settings.adapter_backend is not AdapterBackend.synthetic:
-        console.print("[red]live backend not implemented yet (phase 7)[/red]", file=sys.stderr)
+    if settings.adapter_backend is AdapterBackend.synthetic:
+        synthetic_server(scenario, seed, state, actions_enabled=actions).run(transport="stdio")
+        return
+    from pager_zero.adapters.live import LiveAdapters, live_incident
+
+    if not alert_service:
+        console.print("[red]live backend needs --alert-service[/red]", file=sys.stderr)
         raise typer.Exit(code=2)
-    synthetic_server(scenario, seed, state, actions_enabled=actions).run(transport="stdio")
+    inc = live_incident(
+        alert_service, alert_name, alert_summary or f"{alert_name} on {alert_service}"
+    )
+    build_server(LiveAdapters.from_settings(), actions_enabled=actions, incident=inc).run(
+        transport="stdio"
+    )
 
 
 incident_app = typer.Typer(help="Run the agent on an incident.")

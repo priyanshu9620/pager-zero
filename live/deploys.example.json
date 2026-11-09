@@ -1,0 +1,11 @@
+[
+  {
+    "service": "checkout-api",
+    "version": "v1.60",
+    "previous_version": "v1.59",
+    "at": "2026-11-08T11:06:24+00:00",
+    "commit_sha": "df705b8",
+    "actor": "ci",
+    "status": "succeeded"
+  }
+]

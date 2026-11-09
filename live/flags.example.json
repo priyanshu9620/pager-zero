@@ -1,0 +1,17 @@
+{
+  "values": {
+    "checkout.fallback_pricing.enabled": true,
+    "checkout.cart_cache.ttl_seconds": 300,
+    "orders.batch_size": 100,
+    "orders.retry.enabled": true
+  },
+  "history": [
+    {
+      "key": "orders.batch_size",
+      "old": 100,
+      "new": 1,
+      "at": "2026-11-08T11:02:00+00:00",
+      "actor": "flag-console:someone"
+    }
+  ]
+}
