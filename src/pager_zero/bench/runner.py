@@ -25,6 +25,20 @@ def plan_incidents(n: int, seed: int, families: list[str] | None) -> list[tuple[
     return [(fams[i % len(fams)], seed * 1000 + i) for i in range(n)]
 
 
+def _root_cause(e: BaseException) -> BaseException:
+    """Unwrap ExceptionGroups / chained exceptions to the innermost real error."""
+    seen = 0
+    while seen < 20:
+        seen += 1
+        if isinstance(e, BaseExceptionGroup) and e.exceptions:
+            e = e.exceptions[0]
+        elif e.__cause__ is not None:
+            e = e.__cause__
+        else:
+            return e
+    return e
+
+
 async def run_one(scenario: str, inc_seed: int, memory: bool) -> Score:
     quiet = Console(quiet=True)
     meta = new_incident(scenario, inc_seed, memory=memory)
@@ -36,7 +50,7 @@ async def run_one(scenario: str, inc_seed: int, memory: bool) -> Score:
             state = await resume(meta, {"decision": "approve", "note": "bench auto-approve"}, quiet)
         return score(scenario, inc_seed, meta, gt, state, time.time() - t0)
     except Exception as e:  # noqa: BLE001 — a crash is a failed incident, not a failed bench
-        err = f"{type(e).__name__}: {str(e)[:300]}"
+        err = f"{type(e).__name__}: {str(_root_cause(e))[:300]}"
         return score(
             scenario,
             inc_seed,
