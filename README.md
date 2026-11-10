@@ -31,6 +31,9 @@ inc_526d0985 → resolved
 
 Everything above ran on a **free** `gemini-3.5-flash-lite` key. Swap the model with two lines in `.env`.
 
+**New here?** [`docs/GUIDE.md`](docs/GUIDE.md) is the full manual: prerequisites, every command,
+what each UI panel means, the demo stack, pointing it at your own infra, troubleshooting.
+
 **Not convinced it isn't rigged?** Fire a *blind* incident: `pz incident fire` (no `-s`) or the 🎲
 button in the UI picks the failure family and seed server-side and hides both from you *and* the
 agent until the incident is over — then shows the planted truth next to what the agent concluded,

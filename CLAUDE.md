@@ -3,6 +3,7 @@
 Personal resume project of Priyanshu Gupta. **Not a Meesho repo.**
 
 ## Start here
+User-facing manual (setup, commands, UI, demo stack, troubleshooting): `docs/GUIDE.md` — keep it current.
 Project memory lives OUTSIDE this repo: `~/Desktop/pager-zero-notes/`.
 Read `session/HANDOFF.md` there before doing anything; it points to locked decisions, the build plan,
 progress and problems. Update those files as you work (rules in that folder's README).
