@@ -82,7 +82,9 @@ async def test_investigation_trail_bad_deploy() -> None:
     logs = _payload(await srv.call_tool("search_logs", {"service": svc, "query": "error"}))
     assert logs["total_matches"] > 100 and "slow query" in logs["top_messages"][0]["message"]
     diff = _payload(await srv.call_tool("get_diff", {"sha": deploys["items"][0]["commit_sha"]}))
-    assert "for _, id := range ids" in diff
+    assert "for _, id := range ids" in diff["diff"]
+    missing = _payload(await srv.call_tool("get_diff", {"sha": "nope123"}))
+    assert missing["diff"] is None and "note" in missing
 
 
 async def test_mutation_persists_state_across_processes(tmp_path: Path) -> None:

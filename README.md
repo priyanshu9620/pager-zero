@@ -148,7 +148,11 @@ uv run pz approve <incident id>
 | Google AI Studio | `google_genai` | `gemini-3.5-flash` | free; stronger, ~5–11 s/turn |
 | Anthropic | `anthropic` | `claude-opus-5-5` | paid |
 | Groq | `groq` | `openai/gpt-oss-120b` | free tier's 8k tokens/min is too small for a 12-step agent |
-| Ollama | `ollama` | `qwen2.5:14b` | local, no key |
+| Ollama | `ollama` | `qwen2.5:14b` | local, **no key, no quota**; ~2 min per incident on an M4 Pro; solved a blind `downstream-outage` 3/3 but missed a live `bad-deploy` (declined to guess) |
+
+Free cloud tiers are counted in **requests/day** (Gemini: 500 per model) or **tokens/day** (Groq:
+200k); one investigation is 7–15 requests, so a heavy day of testing exhausts them by afternoon.
+Ollama is the way out when that happens — same agent, same tools, two lines of config.
 
 Only tool calling, plain text and Pydantic structured output are used, so anything LangChain's
 `init_chat_model` supports should work.
@@ -214,6 +218,11 @@ uv run pz demo chaos bad-deploy       # or flag-regression | cache-eviction | co
 investigates through Prometheus / Kafka / Redis / the deploy log, proposes a fix, and on approval
 **really** rolls the container back (or rescales the group, or `CONFIG SET`s Redis) — and
 verification watches the real p99 come down. Nothing in the agent knows what you broke.
+
+Measured run (2026-11-10, `gemini-3.5-flash-lite`): deploy injected at T+0 → p99 24 → 495 ms by
+T+20 s → alert fired T+75 s → incident opened T+85 s → diagnosis `bad-deploy v1.5.0`,
+`rollback_deploy(shop-api, v1.4.0)` at T+125 s (7 tool calls) → approved → container rolled back →
+`http_p99_ms peak 495.0 → now 23.7 (baseline 23.7)` 60 s later → **resolved**.
 
 ## Live backend
 

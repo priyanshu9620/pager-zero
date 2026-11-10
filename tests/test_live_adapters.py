@@ -181,3 +181,29 @@ def test_live_classes_satisfy_protocols():
     assert isinstance(DryRunActuator(), base.Actuator)
     assert isinstance(KafkaMessaging("b", topo, None), base.MessagingReader)  # type: ignore[arg-type]
     assert isinstance(RedisCache("r", topo, None), base.CacheReader)  # type: ignore[arg-type]
+
+
+def test_live_incident_does_not_pin_the_clock():
+    """P-31: a pinned `now` froze every live query window at MCP-server start."""
+    from datetime import UTC, datetime, timedelta
+
+    from pager_zero.adapters.live import live_incident
+    from pager_zero.mcp_server.server import build_server
+
+    inc = live_incident("shop-api", "HighLatencyP99", "s")
+    assert "now" not in inc and inc["alert"]["service"] == "shop-api"
+
+    class Topo:
+        def services(self):
+            return ["shop-api"]
+
+    class A:
+        topology = Topo()
+
+    srv = build_server(A(), actions_enabled=False, incident=inc)
+    import asyncio
+
+    out = asyncio.run(srv.call_tool("incident_context", {}))
+    ctx = out[1] if isinstance(out, tuple) else out
+    reported = datetime.fromisoformat(ctx["now"])
+    assert abs(datetime.now(UTC) - reported) < timedelta(seconds=5)

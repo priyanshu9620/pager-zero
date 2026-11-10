@@ -524,6 +524,7 @@ def live_incident(
             "summary": summary,
             "labels": labels or {},
         },
-        "now": now.isoformat(timespec="seconds"),
+        # no "now": a live system's clock is the wall clock. Pinning it here froze every query
+        # window at server start, so verify could never observe the recovery (P-31).
         "window_minutes": window_minutes,
     }

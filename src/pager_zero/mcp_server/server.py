@@ -201,9 +201,16 @@ def build_server(
         )
 
     @read_tool
-    def get_diff(sha: str) -> str:
-        """The unified diff of one commit."""
-        return A.scm.diff(sha)
+    def get_diff(sha: str) -> dict[str, Any]:
+        """The unified diff of one commit (empty with a note if the sha is unknown or the service has no repo)."""
+        try:
+            return {"sha": sha, "diff": A.scm.diff(sha)}
+        except Exception as e:  # noqa: BLE001 — a missing diff is evidence, not a crash
+            return {
+                "sha": sha,
+                "diff": None,
+                "note": f"no diff available for {sha} ({type(e).__name__}); the service may have no SCM repo configured — rely on the deploy log",
+            }
 
     @read_tool
     def get_flag(key: str) -> dict[str, Any]:
