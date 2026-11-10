@@ -32,6 +32,15 @@
   .fire{padding:16px;border-bottom:1px solid var(--line);display:grid;gap:10px}
   .fire .lbl{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
   .fire .row{display:flex;gap:8px}
+  .fire .hint{color:var(--muted);font-size:12px;line-height:1.5}.fire .hint b{color:var(--text);font-weight:600}
+  .fire details{display:grid;gap:8px}.fire summary{cursor:pointer;color:var(--dim);font-size:12.5px;list-style:none}.fire summary::before{content:"▸ "}.fire details[open] summary::before{content:"▾ "}
+  .blind{color:var(--mag)}
+  .truth .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .truth .col h4{margin:0 0 6px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:700}
+  .truth .fam{font-size:16px;font-weight:600}
+  .truth .marks{display:flex;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px}
+  .truth .marks .ok{color:var(--good)}.truth .marks .no{color:var(--bad)}
+  .card.truth{border-color:rgba(192,138,245,.4)}
   select,input,button{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line2);border-radius:8px;padding:8px 11px;outline:none}
   select:focus,input:focus{border-color:var(--accent)}
   button{cursor:pointer;font-weight:600;transition:filter .15s}button:hover{filter:brightness(1.1)}
@@ -121,8 +130,13 @@
   <aside>
     <div class="fire">
       <div class="lbl">Fire a synthetic incident</div>
-      <select id="scenario"></select>
-      <div class="row"><input id="seed" type="number" value="42" min="0" style="width:110px" title="seed"><button class="primary" id="fire" style="flex:1">Fire</button></div>
+      <button class="primary" id="fire-random">🎲 Fire a random incident</button>
+      <div class="hint">Family and seed are chosen server-side and <b>hidden</b> from you and the agent until it's over. Then the planted truth is revealed next to what the agent found.</div>
+      <details>
+        <summary>choose the failure yourself</summary>
+        <select id="scenario"></select>
+        <div class="row"><input id="seed" type="number" value="42" min="0" style="width:110px" title="seed"><button id="fire" style="flex:1">Fire chosen</button></div>
+      </details>
     </div>
     <div class="listhead">Incidents</div>
     <div id="list"></div>
@@ -211,11 +225,15 @@ function pipeline(inc){
 async function loadHealth(){ try{ const h = await api('/healthz'); $('#health').innerHTML = `<span>model <b>${esc(h.llm)}</b></span><span>backend <b>${esc(h.backend)}</b></span><span>memory <b>${esc(h.memory)}</b></span>`; }catch(e){ $('#health').innerHTML = '<span class="err">API unreachable</span>'; } }
 async function loadScenarios(){ const s = await api('/scenarios'); $('#scenario').innerHTML = s.map(x => `<option ${x==='bad-deploy'?'selected':''}>${esc(x)}</option>`).join(''); }
 
+const label = m => m.scenario === 'hidden'
+  ? `<span class="blind">🎲 blind incident</span> <small>hidden until over</small>`
+  : `${m.blind ? '🎲 ' : ''}${esc(m.scenario)} <small>#${esc(m.seed)}</small>`;
+
 async function loadList(){
   const list = (await api('/incidents')).slice().reverse();
   $('#list').innerHTML = list.length ? list.map(m => `
     <div class="inc ${m.id===selected?'sel':''}" data-id="${esc(m.id)}">
-      <div class="top"><span class="name">${esc(m.scenario)} <small>#${esc(m.seed)}</small></span>${pill(m.status)}</div>
+      <div class="top"><span class="name">${label(m)}</span>${pill(m.status)}</div>
       <div class="meta"><span class="id">${esc(m.id)}</span><span>·</span><span>${fmtT(m.created)}</span><span>·</span><span>${esc((m.model||'').split('/').pop())}</span></div>
     </div>`).join('') : '<div class="empty" style="padding:30px 16px">No incidents yet.</div>';
   document.querySelectorAll('.inc').forEach(el => el.onclick = () => { selected = el.dataset.id; openRaw.clear(); render(); });
@@ -225,9 +243,9 @@ function emptyState(){
   return `<div class="empty"><h2>Nothing selected</h2>
     Pager-Zero investigates an alert, proposes a fix, and waits for you.
     <ol>
-      <li>Pick a failure type on the left and press <b>Fire</b> — a synthetic incident is generated and the agent starts investigating.</li>
+      <li>Press <b>Fire a random incident</b> — a failure is planted in a synthetic world; neither you nor the agent is told which. (Or pick one yourself under “choose the failure”.)</li>
       <li>Watch the tool calls appear. Read the <b>diagnosis</b> and the <b>proposed fix</b>.</li>
-      <li>Click <b>Approve &amp; execute</b> (or Reject). Verification checks the metric actually recovered.</li>
+      <li>Click <b>Approve &amp; execute</b> (or Reject). Verification checks the metric actually recovered, then the <b>planted truth</b> is revealed beside the agent's answer.</li>
     </ol></div>`;
 }
 
@@ -243,7 +261,7 @@ async function render(){
     <div class="alert">
       <div class="top">
         <div><h2>${spinning}${a ? `${esc(a.name)} on <span class="svc">${esc(a.service)}</span>` : esc(inc.id)}</h2>
-        <div class="sub">${a ? `${esc(a.summary)} · fired ${fmtT(a.fired_at)} · ` : ''}<code>${esc(inc.id)}</code> · ${esc(inc.scenario)} #${esc(inc.seed)} · ${esc(inc.model)}${inc.error ? ` · <span class="err">${esc(inc.error)}</span>` : ''}</div></div>
+        <div class="sub">${a ? `${esc(a.summary)} · fired ${fmtT(a.fired_at)} · ` : ''}<code>${esc(inc.id)}</code> · ${inc.scenario === 'hidden' ? '<span class="blind">scenario hidden until the incident is over</span>' : `${esc(inc.scenario)} #${esc(inc.seed)}`} · ${esc(inc.model)}${inc.error ? ` · <span class="err">${esc(inc.error)}</span>` : ''}</div></div>
         ${pill(inc.status)}
       </div>
       ${pipeline(inc)}
@@ -270,6 +288,16 @@ async function render(){
   }
   if(x){ html += `<div class="card exec"><h3>Execution</h3><div class="mono">${esc(x.detail || j(x))}</div></div>`; }
   if(v){ html += `<div class="card verify ${v.recovered?'ok':'bad'}"><h3>Verification</h3><div class="verdict ${v.recovered?'ok':'bad'}">${v.recovered?'✔ Recovered':'✘ Not recovered'}</div><p class="muted" style="margin:8px 0 0">${esc(v.note)}</p></div>`; }
+  const t = inc.truth;
+  if(t){
+    const mark = (ok, txt) => `<span class="${ok?'ok':'no'}">${ok?'✔':'✘'} ${txt}</span>`;
+    html += `<div class="card truth"><h3>Ground truth <span class="cnt">${inc.blind ? 'was hidden from you and the agent · ' : ''}revealed: ${esc(t.scenario)} #${esc(t.seed)}</span></h3>
+      <div class="row2">
+        <div class="col"><h4>Planted</h4><div class="fam">${esc(t.planted.family)}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(t.planted.cause)}</p><div class="mono muted">${esc(t.planted.fix.action)}(${esc(Object.entries(t.planted.fix.target).map(([k,v])=>`${k}=${j(v)}`).join(', '))})</div></div>
+        <div class="col"><h4>Agent concluded</h4><div class="fam">${esc(d?.family ?? '—')}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(d?.root_cause ?? 'no diagnosis')}</p><div class="mono muted">${p ? `${esc(p.action)}(${esc(Object.entries(p.target||{}).map(([k,v])=>`${k}=${j(v)}`).join(', '))})` : 'no fix proposed'}</div></div>
+      </div>
+      <div class="marks">${mark(t.root_cause_ok,'root cause family')}${mark(t.culprit_ok,'culprit named')}${mark(t.fix_ok,'fix matches')}${v ? mark(v.recovered,'recovery verified') : ''}</div></div>`;
+  }
   $('#detail').innerHTML = html;
   document.querySelectorAll('.toggle').forEach(el => el.onclick = () => { const id = el.dataset.raw; openRaw.has(id) ? openRaw.delete(id) : openRaw.add(id); render(); });
   const ap = $('#approve'), rj = $('#reject');
@@ -285,13 +313,15 @@ async function decide(kind){
   await Promise.all([loadList(), render()]);
 }
 
-$('#fire').onclick = async () => {
-  const btn = $('#fire'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>firing';
-  try { const m = await api('/incidents', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({scenario: $('#scenario').value, seed: Number($('#seed').value)})}); selected = m.id; openRaw.clear(); }
+async function fire(btn, body){
+  const was = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>firing';
+  try { const m = await api('/incidents', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body)}); selected = m.id; openRaw.clear(); }
   catch(e){ alert(e.message); }
-  btn.disabled = false; btn.textContent = 'Fire';
+  btn.disabled = false; btn.innerHTML = was;
   await Promise.all([loadList(), render()]);
-};
+}
+$('#fire-random').onclick = () => fire($('#fire-random'), {scenario: 'random'});
+$('#fire').onclick = () => fire($('#fire'), {scenario: $('#scenario').value, seed: Number($('#seed').value)});
 
 (async () => { render(); await Promise.all([loadHealth(), loadScenarios(), loadList()]); setInterval(async () => { await loadList(); if(selected) await render(); }, 2000); })();
 </script>

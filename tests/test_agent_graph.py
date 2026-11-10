@@ -221,3 +221,21 @@ async def test_current_state_reads_sqlite_checkpoint(tmp_path, monkeypatch):
     assert st["status"] == "awaiting_approval" and st["plan"]["action"] == "rollback_deploy"
     assert st["diagnosis"]["family"] == "bad-deploy" and "messages" in st
     assert await runner.current_state({"id": "nope"}) == {}
+
+
+def test_new_incident_random_is_blind_and_hidden(tmp_path, monkeypatch):
+    from pager_zero.agent import runner
+    from pager_zero.synth import list_scenarios
+
+    monkeypatch.setattr(runner, "INCIDENTS_DIR", tmp_path / "inc")
+    meta = runner.new_incident("random", None)
+    assert meta["blind"] and meta["scenario"] in list_scenarios() and 1000 <= meta["seed"] <= 99_999
+    assert runner.public_meta(meta)["scenario"] == "hidden"
+    assert runner.truth_check(meta, {}) is None
+    meta["status"] = "rejected"
+    assert runner.public_meta(meta)["scenario"] == meta["scenario"]
+    t = runner.truth_check(meta, {})
+    assert t["planted"]["family"] == meta["scenario"] and not t["fix_ok"]
+
+    explicit = runner.new_incident("bad-deploy", 42)
+    assert not explicit["blind"] and runner.public_meta(explicit)["seed"] == 42

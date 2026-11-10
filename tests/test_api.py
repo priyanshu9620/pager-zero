@@ -132,3 +132,42 @@ async def test_alertmanager_webhook(client, monkeypatch):
             "/webhooks/alertmanager", json={"alerts": [{"labels": {"alertname": "x"}}]}
         )
         assert r.status_code == 400
+
+
+async def test_blind_incident_hides_then_reveals(client, monkeypatch):
+    plan = {"action": "set_cache_limit", "target": {"name": "offer-cache", "max_memory_mb": 99999}}
+    _fake_runner(
+        monkeypatch,
+        {"status": "awaiting_approval", "diagnosis": {"family": "cache-eviction"}, "plan": plan},
+        {
+            "status": "resolved",
+            "diagnosis": {"family": "cache-eviction", "root_cause": "x", "evidence": []},
+            "plan": plan,
+            "verification": {"recovered": True},
+        },
+    )
+    async with client as c:
+        r = await c.post("/incidents", json={"scenario": "random"})
+        assert r.status_code == 202
+        body = r.json()
+        iid = body["id"]
+        assert body["blind"] is True and body["scenario"] == "hidden" and body["seed"] is None
+        await _settle()
+
+        listed = (await c.get("/incidents")).json()[0]
+        assert listed["scenario"] == "hidden" and listed["seed"] is None
+        got = (await c.get(f"/incidents/{iid}")).json()
+        assert got["scenario"] == "hidden" and got["truth"] is None
+
+        await c.post(f"/incidents/{iid}/approve")
+        await _settle()
+        got = (await c.get(f"/incidents/{iid}")).json()
+        real = runner.load_meta(iid)
+        assert got["scenario"] == real["scenario"] and got["seed"] == real["seed"]
+        t = got["truth"]
+        assert t["planted"]["family"] == real["scenario"]
+        assert t["root_cause_ok"] is (real["scenario"] == "cache-eviction")
+        assert t["fix_ok"] is (
+            real["scenario"] == "cache-eviction"
+            and t["planted"]["fix"]["target"]["name"] == "offer-cache"
+        )

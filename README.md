@@ -31,6 +31,11 @@ inc_526d0985 → resolved
 
 Everything above ran on a **free** `gemini-3.5-flash-lite` key. Swap the model with two lines in `.env`.
 
+**Not convinced it isn't rigged?** Fire a *blind* incident: `pz incident fire` (no `-s`) or the 🎲
+button in the UI picks the failure family and seed server-side and hides both from you *and* the
+agent until the incident is over — then shows the planted truth next to what the agent concluded,
+with ✔/✘ on root cause, culprit and fix. The agent only ever sees the alert and the tools.
+
 ---
 
 ## Why
@@ -154,7 +159,7 @@ Only tool calling, plain text and Pydantic structured output are used, so anythi
 pz doctor [--ping]                         effective config, key check, model ping
 pz world list | show -s <scenario> --seed N [--truth]
 pz mcp serve [-s … --seed N] [--state f] [--actions]     MCP server over stdio
-pz incident fire -s <scenario> --seed N    run the agent to the approval point
+pz incident fire [-s <scenario> --seed N]  run the agent to the approval point (default: blind random)
 pz approve <id> | pz reject <id>           resume: execute + verify, or stop
 pz incident list | show <id>
 pz memory init | search "<text>" | count
@@ -168,14 +173,15 @@ pz serve [--port 8000]                     FastAPI (docs at /docs)
 uv run pz serve            # then open http://127.0.0.1:8000/ui
 ```
 
-Fire an incident, watch the tool calls stream in, read the diagnosis and the proposed fix, and click
-**Approve & execute** or **Reject**. One static page served by the API — no build step.
+Fire a random (blind) incident, watch the tool calls stream in with inline sparklines, read the
+diagnosis and the proposed fix, click **Approve & execute** or **Reject**, then compare the revealed
+ground truth with the agent's answer. One static page served by the API — no build step.
 
 ## HTTP API
 
 ```
-POST /incidents                 {"scenario": "bad-deploy", "seed": 42}   → 202, agent runs in background
-GET  /incidents/{id}            status, diagnosis, plan, verification
+POST /incidents                 {"scenario": "random"} or {"scenario": "bad-deploy", "seed": 42}  → 202
+GET  /incidents/{id}            status, diagnosis, plan, verification; `truth` (planted vs found) once over
 GET  /incidents/{id}/trace      audit trail
 POST /incidents/{id}/approve    {"note": "..."}  → 202
 POST /incidents/{id}/reject
@@ -215,7 +221,7 @@ ADAPTER_BACKEND=live REDIS_URL=redis://localhost:6380/0 \
 ## Development
 
 ```bash
-make test        # 58 tests, no API key needed (MEMORY_BACKEND=memory)
+make test        # 62 tests, no API key needed (MEMORY_BACKEND=memory)
 make lint
 PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
 ```
@@ -228,7 +234,8 @@ PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
   deploy and flag history are file-backed plug points, not integrations with a specific CI or flag
   service.
 - One alert → one incident → one fix. No multi-alert correlation yet.
-- Web approval UI is planned; today approval is CLI/API.
+- Incidents are planted in a generated world, not caused in a running system. A demo stack with
+  real services, real Prometheus and chaos-injected faults through the live adapters is the next step.
 
 ## License
 

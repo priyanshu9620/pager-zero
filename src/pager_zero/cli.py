@@ -173,20 +173,31 @@ app.add_typer(incident_app, name="incident")
 
 @incident_app.command("fire")
 def incident_fire(
-    scenario: str = typer.Option("bad-deploy", "--scenario", "-s"),
-    seed: int = typer.Option(1, "--seed"),
+    scenario: str = typer.Option(
+        "random",
+        "--scenario",
+        "-s",
+        help="Scenario family, or `random` (blind: hidden until over).",
+    ),
+    seed: int | None = typer.Option(None, "--seed", help="Deterministic seed; omitted → random."),
 ) -> None:
     """Generate a synthetic incident and run the agent until it needs approval."""
     import asyncio
 
     from rich.panel import Panel
 
-    from pager_zero.agent.runner import new_incident, run_until_approval
+    from pager_zero.agent.runner import new_incident, public_meta, run_until_approval
 
     meta = new_incident(scenario, seed)
+    shown = public_meta(meta)
     console.print(
-        f"▶ incident [bold]{meta['id']}[/bold]  scenario={scenario} seed={seed}  "
+        f"▶ incident [bold]{meta['id']}[/bold]  scenario={shown['scenario']} seed={shown['seed']}  "
         f"model={settings.llm_provider}/{settings.llm_model}"
+        + (
+            "  [dim](blind — revealed by `pz incident show` once resolved)[/dim]"
+            if meta["blind"]
+            else ""
+        )
     )
     state = asyncio.run(run_until_approval(meta, console))
     status = state.get("status")
@@ -231,12 +242,12 @@ def incident_reject(incident_id: str, reason: str = typer.Option("", "--reason")
 @incident_app.command("list")
 def incident_list() -> None:
     """List incidents and their status."""
-    from pager_zero.agent.runner import list_incidents
+    from pager_zero.agent.runner import list_incidents, public_meta
 
     t = Table()
     for col in ("id", "scenario", "seed", "status", "model", "created"):
         t.add_column(col)
-    for m in list_incidents():
+    for m in map(public_meta, list_incidents()):
         t.add_row(
             m["id"],
             m["scenario"],
@@ -254,15 +265,26 @@ def incident_show(incident_id: str) -> None:
     import asyncio
     import json
 
-    from pager_zero.agent.runner import current_state, load_meta
+    from pager_zero.agent.runner import current_state, load_meta, public_meta, truth_check
 
     meta = load_meta(incident_id)
     st = asyncio.run(current_state(meta))
+    shown = public_meta(meta)
+    console.print(f"[bold]scenario[/bold]: {shown['scenario']}  [bold]seed[/bold]: {shown['seed']}")
     for key in ("status", "steps", "diagnosis", "plan", "approval", "execution", "verification"):
         if key in st:
             console.print(
                 f"[bold]{key}[/bold]: {json.dumps(st[key], indent=1, default=str) if isinstance(st[key], dict) else st[key]}"
             )
+    truth = truth_check(meta, st)
+    if truth:
+        ok = lambda b: "[green]✔[/green]" if b else "[red]✘[/red]"  # noqa: E731
+        console.print(
+            f"[bold]ground truth[/bold]: {truth['planted']['family']} — {truth['planted']['cause']}\n"
+            f"  expected fix: {truth['planted']['fix']['action']}({truth['planted']['fix']['target']})\n"
+            f"  root cause {ok(truth['root_cause_ok'])}  culprit named {ok(truth['culprit_ok'])}  "
+            f"fix {ok(truth['fix_ok'])}"
+        )
 
 
 memory_app = typer.Typer(help="Incident memory (pgvector).")

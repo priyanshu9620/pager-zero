@@ -45,8 +45,12 @@ _running: dict[str, asyncio.Task[Any]] = {}  # incident id -> background task
 
 
 class CreateIncident(BaseModel):
-    scenario: str = Field("bad-deploy", description="One of the synthetic scenario families.")
-    seed: int = 1
+    scenario: str = Field(
+        "random",
+        description="A synthetic scenario family, or `random` for a blind incident: family and "
+        "seed are chosen server-side and hidden until the incident is over.",
+    )
+    seed: int | None = Field(None, description="Deterministic seed; omitted → random.")
     memory: bool = True
 
 
@@ -80,7 +84,8 @@ def _meta_or_404(incident_id: str) -> dict[str, Any]:
 def _view(meta: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any]:
     state = state or {}
     return {
-        **meta,
+        **runner.public_meta(meta),
+        "truth": runner.truth_check(meta, state) if state else None,
         "running": meta["id"] in _running and not _running[meta["id"]].done(),
         "steps": state.get("steps"),
         "diagnosis": state.get("diagnosis"),
@@ -134,7 +139,7 @@ def scenarios() -> list[str]:
 
 @app.post("/incidents", status_code=202)
 async def create_incident(body: CreateIncident) -> dict[str, Any]:
-    if body.scenario not in list_scenarios():
+    if body.scenario != runner.RANDOM and body.scenario not in list_scenarios():
         raise HTTPException(400, f"unknown scenario {body.scenario!r}; see GET /scenarios")
     meta = runner.new_incident(body.scenario, body.seed, memory=body.memory)
     meta["status"] = "investigating"
@@ -145,14 +150,14 @@ async def create_incident(body: CreateIncident) -> dict[str, Any]:
 
 @app.get("/incidents")
 def list_incidents() -> list[dict[str, Any]]:
-    return runner.list_incidents()
+    return [runner.public_meta(m) for m in runner.list_incidents()]
 
 
 @app.get("/incidents/{incident_id}")
 async def get_incident(incident_id: str) -> dict[str, Any]:
     meta = _meta_or_404(incident_id)
     state = await runner.current_state(meta) if meta["status"] != "created" else {}
-    return _view(meta, state)
+    return _view(meta, state or ({"_": 1} if meta["status"] in runner.TERMINAL else None))
 
 
 @app.get("/incidents/{incident_id}/trace")

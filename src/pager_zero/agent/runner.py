@@ -7,6 +7,7 @@ Graph checkpoints:       .pz/checkpoints.sqlite  (thread_id = incident id)
 from __future__ import annotations
 
 import json
+import random
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -51,13 +52,33 @@ def list_incidents() -> list[dict[str, Any]]:
     )
 
 
-def new_incident(scenario: str, seed: int, memory: bool = True) -> dict[str, Any]:
+RANDOM = "random"
+TERMINAL = frozenset({"resolved", "unresolved", "rejected", "error"})
+
+
+def new_incident(
+    scenario: str, seed: int | None, memory: bool = True, blind: bool = False
+) -> dict[str, Any]:
+    """Create an incident record.
+
+    `scenario="random"` picks a family and a seed the caller never sees and marks the incident
+    *blind*: the API/UI hide scenario + seed until the incident reaches a terminal state, then
+    reveal the planted ground truth next to what the agent concluded (notes D-37).
+    """
+    from pager_zero.synth import list_scenarios
+
+    sysrand = random.SystemRandom()
+    if scenario == RANDOM:
+        scenario, blind = sysrand.choice(list_scenarios()), True
+    if seed is None:
+        seed = sysrand.randint(1000, 99_999)
     iid = f"inc_{uuid.uuid4().hex[:8]}"
     meta = {
         "memory": memory,
         "id": iid,
         "scenario": scenario,
         "seed": seed,
+        "blind": blind,
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "status": "created",
         "provider": settings.llm_provider,
@@ -66,6 +87,41 @@ def new_incident(scenario: str, seed: int, memory: bool = True) -> dict[str, Any
     }
     save_meta(meta)
     return meta
+
+
+def is_hidden(meta: dict[str, Any]) -> bool:
+    return bool(meta.get("blind")) and meta.get("status") not in TERMINAL
+
+
+def public_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    """What callers outside the runner may see: a blind incident hides scenario + seed."""
+    if not is_hidden(meta):
+        return dict(meta)
+    return {**meta, "scenario": "hidden", "seed": None, "world": None}
+
+
+def truth_check(meta: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """Planted ground truth vs what the agent concluded. Only once the incident is over."""
+    if meta.get("status") not in TERMINAL:
+        return None
+    from pager_zero.bench.scoring import culprit_named
+    from pager_zero.synth import generate
+
+    gt = generate(meta["scenario"], meta["seed"]).ground_truth
+    diag, plan = state.get("diagnosis"), state.get("plan")
+    return {
+        "scenario": meta["scenario"],
+        "seed": meta["seed"],
+        "planted": {
+            "family": gt.family,
+            "cause": gt.cause,
+            "culprit": gt.culprit,
+            "fix": {"action": gt.fix_action, "target": gt.fix_target},
+        },
+        "root_cause_ok": bool(diag) and diag.get("family") == gt.family,
+        "culprit_ok": culprit_named(gt, diag),
+        "fix_ok": bool(plan) and gt.matches(plan["action"], plan["target"]),
+    }
 
 
 def _server_args(meta: dict[str, Any], actions: bool) -> list[str]:
