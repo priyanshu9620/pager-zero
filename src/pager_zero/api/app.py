@@ -38,7 +38,8 @@ def root() -> RedirectResponse:
 @app.get("/ui", include_in_schema=False)
 def ui() -> FileResponse:
     """The approval console: fire incidents, watch the investigation, approve or reject."""
-    return FileResponse(STATIC / "index.html")
+    # single-file UI that changes often: never let the browser serve a stale copy
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
 _quiet = Console(quiet=True)
