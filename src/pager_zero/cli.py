@@ -356,19 +356,33 @@ def demo_status() -> None:
 @demo_app.command("chaos")
 def demo_chaos(
     fault: str = typer.Argument(
-        ..., help="bad-deploy | flag-regression | cache-eviction | consumer-lag | downstream-outage"
+        "random",
+        help="random (sealed: you are not told which) | bad-deploy | flag-regression | cache-eviction | consumer-lag | downstream-outage",
     ),
 ) -> None:
     """Really break the running stack. Alertmanager will page `pz serve` within ~1–2 minutes."""
-    from pager_zero.demo import FAULTS
+    from pager_zero.demo import FAULTS, RANDOM
 
-    if fault not in FAULTS:
-        console.print(f"[red]unknown fault {fault!r}[/red]; one of {', '.join(FAULTS)}")
+    if fault == RANDOM:
+        console.print(f"[bold red]chaos[/bold red] {_stack().chaos_random()}")
+    elif fault not in FAULTS:
+        console.print(f"[red]unknown fault {fault!r}[/red]; one of random, {', '.join(FAULTS)}")
         raise typer.Exit(code=2)
-    console.print(f"[bold red]chaos[/bold red] {_stack().chaos(fault)}")
+    else:
+        console.print(f"[bold red]chaos[/bold red] {_stack().chaos(fault)}")
     console.print(
         "[dim]watch http://localhost:9090/alerts — the alert fires after the `for:` window, then the incident appears in the UI[/dim]"
     )
+
+
+@demo_app.command("reveal")
+def demo_reveal() -> None:
+    """Show which fault `pz demo chaos random` injected (keeps it sealed for the incident card)."""
+    doc = _stack().sealed()
+    if not doc:
+        console.print("nothing sealed")
+        return
+    console.print(f"[bold]{doc['fault']}[/bold] at {doc['at']}: {doc['detail']}")
 
 
 @demo_app.command("heal")

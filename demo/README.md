@@ -22,8 +22,11 @@ uv run pz demo up          # builds the images, starts 9 containers, writes demo
 make demo-serve            # Pager-Zero on :8000 with ADAPTER_BACKEND=live ACTUATOR=demo
 open http://127.0.0.1:8000/ui
 
-uv run pz demo chaos bad-deploy        # or: flag-regression | cache-eviction | consumer-lag | downstream-outage
+uv run pz demo chaos                   # RANDOM, sealed: you are not told which fault was injected
+uv run pz demo chaos bad-deploy        # or pick: flag-regression | cache-eviction | consumer-lag | downstream-outage
 # ~1–2 min later Alertmanager pages pz serve → a ⚡ live incident appears → approve → watch Prometheus recover
+# when the incident closes, the UI's "What was actually broken" card reveals the sealed fault next to
+# the agent's answer (✔/✘ on family and fix action); `pz demo reveal` prints it on the CLI
 uv run pz demo heal                    # undo every fault
 uv run pz demo down                    # stop (add -v to drop data)
 ```

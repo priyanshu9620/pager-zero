@@ -138,3 +138,36 @@ def test_actuator_other_actions(stack):
     )
     assert not act.enable_fallback("shop-api", "shop-db").ok
     assert not act.rate_limit_key("t", "k", 10).ok
+
+
+def test_random_chaos_is_sealed_and_revealed(stack):
+    msg = stack.chaos_random()
+    assert all(f not in msg for f in FAULTS), "the fault name must not be printed"
+    doc = stack.sealed()
+    assert doc and doc["fault"] in FAULTS and doc["detail"]
+    assert stack.heal()[0] == "sealed fault cleared" and stack.sealed() is None
+
+
+def test_live_truth_check_uses_sealed_fault(stack, monkeypatch):
+    from pager_zero.agent import runner
+    from pager_zero.config import settings
+
+    monkeypatch.setattr(settings, "demo_dir", stack.root)
+    monkeypatch.setattr(stack.__class__, "redis_maxmemory", lambda self, v: None)
+    stack.chaos("cache-eviction")
+    stack.sealed_file.write_text(
+        '{"fault": "cache-eviction", "detail": "d", "at": "2026-11-10T00:00:00+00:00"}'
+    )
+    meta = {"backend": "live", "status": "resolved", "created": "2026-11-10T01:00:00+00:00"}
+    state = {
+        "diagnosis": {"family": "cache-eviction"},
+        "plan": {"action": "set_cache_limit", "target": {}},
+    }
+    t = runner.truth_check(meta, state)
+    assert t["sealed"] and t["planted"]["family"] == "cache-eviction"
+    assert t["root_cause_ok"] and t["fix_ok"] and t["culprit_ok"] is None
+    # sealed AFTER the incident opened → not this incident's fault
+    meta["created"] = "2026-11-09T00:00:00+00:00"
+    assert runner.truth_check(meta, state) is None
+    # not terminal → nothing
+    assert runner.truth_check({**meta, "status": "investigating"}, state) is None

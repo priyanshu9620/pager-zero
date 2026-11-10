@@ -211,13 +211,14 @@ chaos command that does real damage:
 ```bash
 uv run pz demo up                     # 9 containers
 make demo-serve                       # pz serve against the live adapters, real actuator
-uv run pz demo chaos bad-deploy       # or flag-regression | cache-eviction | consumer-lag | downstream-outage
+uv run pz demo chaos                  # random + sealed — or name one: bad-deploy | flag-regression | cache-eviction | consumer-lag | downstream-outage
 ```
 
 ~1–2 minutes later Alertmanager pages Pager-Zero, a ⚡ live incident appears in the UI, the agent
 investigates through Prometheus / Kafka / Redis / the deploy log, proposes a fix, and on approval
 **really** rolls the container back (or rescales the group, or `CONFIG SET`s Redis) — and
-verification watches the real p99 come down. Nothing in the agent knows what you broke.
+verification watches the real p99 come down. Nothing in the agent knows what you broke — and
+with a sealed random fault, neither do you until the incident closes and the card reveals it.
 
 Measured run (2026-11-10, `gemini-3.5-flash-lite`): deploy injected at T+0 → p99 24 → 495 ms by
 T+20 s → alert fired T+75 s → incident opened T+85 s → diagnosis `bad-deploy v1.5.0`,

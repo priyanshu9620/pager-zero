@@ -102,9 +102,15 @@ def public_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def truth_check(meta: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
-    """Planted ground truth vs what the agent concluded. Only once the incident is over."""
-    if meta.get("status") not in TERMINAL or meta.get("backend") == LIVE:
+    """Planted ground truth vs what the agent concluded. Only once the incident is over.
+
+    Synthetic: regenerate the world and compare. Live: only if `pz demo chaos random` sealed a
+    fault before this incident opened — then reveal it and score the family + fix action.
+    """
+    if meta.get("status") not in TERMINAL:
         return None
+    if meta.get("backend") == LIVE:
+        return _sealed_truth(meta, state)
     from pager_zero.bench.scoring import culprit_named
     from pager_zero.synth import generate
 
@@ -373,6 +379,30 @@ def _remember(meta: dict[str, Any], values: dict[str, Any]) -> None:
             values["context"], values["diagnosis"], values.get("plan"), values.get("verification")
         )
     )
+
+
+def _sealed_truth(meta: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    from pager_zero.demo import EXPECTED_FIX, DemoStack
+
+    sealed = DemoStack(settings.demo_dir).sealed()
+    if not sealed or sealed["at"] > meta["created"]:
+        return None
+    diag, plan = state.get("diagnosis"), state.get("plan")
+    fault = sealed["fault"]
+    return {
+        "scenario": "live",
+        "seed": None,
+        "sealed": True,
+        "planted": {
+            "family": fault,
+            "cause": sealed["detail"],
+            "culprit": {},
+            "fix": {"action": " | ".join(EXPECTED_FIX[fault]), "target": {}},
+        },
+        "root_cause_ok": bool(diag) and diag.get("family") == fault,
+        "culprit_ok": None,
+        "fix_ok": bool(plan) and plan["action"] in EXPECTED_FIX[fault],
+    }
 
 
 STATE_KEYS = (

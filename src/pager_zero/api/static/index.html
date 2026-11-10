@@ -302,12 +302,13 @@ async function render(){
   const t = inc.truth;
   if(t){
     const mark = (ok, txt) => `<span class="${ok?'ok':'no'}">${ok?'✔':'✘'} ${txt}</span>`;
-    html += `<div class="card truth"><h3>Ground truth <span class="cnt">${inc.blind ? 'was hidden from you and the agent · ' : ''}revealed: ${esc(t.scenario)} #${esc(t.seed)}</span></h3>
+    const revealed = t.sealed ? 'sealed fault from <code>pz demo chaos random</code> — nobody was told' : `revealed: ${esc(t.scenario)} #${esc(t.seed)}`;
+    html += `<div class="card truth"><h3>${t.sealed ? 'What was actually broken' : 'Ground truth'} <span class="cnt">${inc.blind ? 'was hidden from you and the agent · ' : ''}${revealed}</span></h3>
       <div class="row2">
         <div class="col"><h4>Planted</h4><div class="fam">${esc(t.planted.family)}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(t.planted.cause)}</p><div class="mono muted">${esc(t.planted.fix.action)}(${esc(Object.entries(t.planted.fix.target).map(([k,v])=>`${k}=${j(v)}`).join(', '))})</div></div>
         <div class="col"><h4>Agent concluded</h4><div class="fam">${esc(d?.family ?? '—')}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(d?.root_cause ?? 'no diagnosis')}</p><div class="mono muted">${p ? `${esc(p.action)}(${esc(Object.entries(p.target||{}).map(([k,v])=>`${k}=${j(v)}`).join(', '))})` : 'no fix proposed'}</div></div>
       </div>
-      <div class="marks">${mark(t.root_cause_ok,'root cause family')}${mark(t.culprit_ok,'culprit named')}${mark(t.fix_ok,'fix matches')}${v ? mark(v.recovered,'recovery verified') : ''}</div></div>`;
+      <div class="marks">${mark(t.root_cause_ok,'root cause family')}${t.culprit_ok === null ? '' : mark(t.culprit_ok,'culprit named')}${mark(t.fix_ok, t.sealed ? 'right fix action' : 'fix matches')}${v ? mark(v.recovered,'recovery verified') : ''}</div></div>`;
   }
   $('#detail').innerHTML = html;
   document.querySelectorAll('.toggle').forEach(el => el.onclick = () => { const id = el.dataset.raw; openRaw.has(id) ? openRaw.delete(id) : openRaw.add(id); render(); });

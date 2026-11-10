@@ -25,6 +25,15 @@ from pathlib import Path
 from typing import Any
 
 FAULTS = ("bad-deploy", "flag-regression", "cache-eviction", "consumer-lag", "downstream-outage")
+RANDOM = "random"
+# the action that really undoes each fault (what a correct plan must propose)
+EXPECTED_FIX = {
+    "bad-deploy": ("rollback_deploy",),
+    "flag-regression": ("set_flag",),
+    "cache-eviction": ("set_cache_limit",),
+    "consumer-lag": ("scale_consumers", "restart_consumer_group"),
+    "downstream-outage": ("enable_fallback",),
+}
 DEFAULT_ENV = {"SHOP_VERSION": "v1.4.0", "SHOP_SLOW_QUERY": "0", "WORKER_SLEEP_MS": "5"}
 HEALTHY_REDIS_MAXMEMORY = "64mb"
 
@@ -150,6 +159,43 @@ class DemoStack:
 
     # ------------------------------------------------------------ chaos
 
+    # ------------------------------------------------------------ sealed (blind) chaos
+
+    @property
+    def sealed_file(self) -> Path:
+        return self.state / "sealed.json"
+
+    def chaos_random(self) -> str:
+        """Pick a fault you are not told about; `sealed()` reveals it when the incident closes."""
+        import random
+
+        fault = random.SystemRandom().choice(FAULTS)
+        detail = self.chaos(fault)
+        self.state.mkdir(parents=True, exist_ok=True)
+        self.sealed_file.write_text(
+            json.dumps(
+                {
+                    "fault": fault,
+                    "detail": detail,
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+            )
+        )
+        return "a fault was injected and sealed — `pz demo reveal`, or the incident's ground-truth card, tells you which"
+
+    def sealed(self) -> dict[str, Any] | None:
+        if not self.sealed_file.exists():
+            return None
+        return json.loads(self.sealed_file.read_text())
+
+    def unseal(self) -> dict[str, Any] | None:
+        doc = self.sealed()
+        if doc:
+            self.sealed_file.unlink()
+        return doc
+
+    # ------------------------------------------------------------ chaos
+
     def chaos(self, fault: str) -> str:
         if fault not in FAULTS:
             raise ValueError(f"unknown fault {fault!r}; known: {FAULTS}")
@@ -173,6 +219,8 @@ class DemoStack:
 
     def heal(self) -> list[str]:
         done = []
+        if self.unseal():
+            done.append("sealed fault cleared")
         env = self.read_env()
         if env["SHOP_SLOW_QUERY"] != "0":
             self.redeploy_shop(DEFAULT_ENV["SHOP_VERSION"], slow_query=False, actor="pz demo heal")
