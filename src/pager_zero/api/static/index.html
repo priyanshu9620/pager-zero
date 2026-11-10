@@ -173,8 +173,12 @@ function seriesSummary(s){
 }
 
 function resultSummary(tool, raw){
+  try { return summarise(tool, raw); } catch(e){ console.warn('summary failed for', tool, e); return ''; }
+}
+function summarise(tool, raw){
   const d = tryJson(raw);
-  if(!d) return '';
+  if(!d || typeof d !== 'object') return '';
+  if('diff' in d && 'sha' in d){ return `<div class="summary"><div class="kv">commit <b>${esc(d.sha)}</b> · ${d.diff ? `${d.diff.split('\n').length} diff lines` : `<span class="muted">${esc(d.note || 'no diff')}</span>`}</div></div>`; }
   if(Array.isArray(d.items) && d.items.length && 'last' in d.items[0]) return d.items.slice(0,4).map(seriesSummary).join('');
   if('last' in d) return seriesSummary(d);
   if(d.top_messages){ return `<div class="summary"><div class="kv"><b>${d.total_matches}</b> matching lines${d.top_messages[0]?` · top: <span style="color:var(--text)">“${esc(d.top_messages[0].message).slice(0,110)}”</span> ×${d.top_messages[0].count}`:''}</div></div>`; }
@@ -184,7 +188,8 @@ function resultSummary(tool, raw){
   if('value' in d && 'key' in d){ return `<div class="summary"><div class="kv"><b>${esc(d.key)}</b> = <b>${esc(j(d.value))}</b></div></div>`; }
   if(d.alert){ return `<div class="summary"><div class="kv">${esc(d.alert.name)} on <b>${esc(d.alert.service)}</b> · ${esc(d.services?.length||0)} services</div></div>`; }
   if(d.version && d.dependencies){ return `<div class="summary"><div class="kv">version <b>${esc(d.version)}</b> · deps ${esc((d.dependencies||[]).join(', '))||'—'} · groups ${esc((d.consumer_groups||[]).join(', '))||'—'} · caches ${esc((d.caches||[]).join(', '))||'—'}</div></div>`; }
-  const keys = Object.keys(d); if(keys.length && d[keys[0]] && 'last' in d[keys[0]]) return keys.slice(0,4).map(k => seriesSummary({...d[k], metric: k})).join('');
+  const keys = Object.keys(d), first = keys.length ? d[keys[0]] : null;
+  if(first && typeof first === 'object' && 'last' in first) return keys.slice(0,4).map(k => seriesSummary({...d[k], metric: k})).join('');
   return '';
 }
 
