@@ -1,0 +1,7 @@
+fastapi==0.162.2
+uvicorn==0.34.0
+prometheus-client==0.21.1
+redis==8.1.0
+psycopg[binary]==3.3.8
+kafka-python==3.0.13
+httpx==0.28.1

@@ -1,0 +1,15 @@
+{
+  "services": {
+    "shop-api": {
+      "dependencies": ["payments-mock", "shop-db"],
+      "caches": ["offer-cache"],
+      "flags": ["shop.offer_cache.ttl_seconds", "shop.fallback_payments.enabled"]
+    },
+    "order-worker": {
+      "consumer_groups": ["order-events-consumer"],
+      "flags": []
+    },
+    "payments-mock": {},
+    "shop-db": {}
+  }
+}

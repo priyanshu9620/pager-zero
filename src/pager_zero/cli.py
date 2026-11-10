@@ -142,6 +142,7 @@ def mcp_serve(
     alert_service: str = typer.Option("", help="live backend: alerting service"),
     alert_name: str = typer.Option("HighLatencyP99", help="live backend: alert name"),
     alert_summary: str = typer.Option("", help="live backend: alert summary"),
+    alert_labels: str = typer.Option("{}", help="live backend: alert labels as JSON"),
 ) -> None:
     """Serve incident tools over stdio. Point any MCP client at this.
 
@@ -159,8 +160,13 @@ def mcp_serve(
     if not alert_service:
         console.print("[red]live backend needs --alert-service[/red]", file=sys.stderr)
         raise typer.Exit(code=2)
+    import json
+
     inc = live_incident(
-        alert_service, alert_name, alert_summary or f"{alert_name} on {alert_service}"
+        alert_service,
+        alert_name,
+        alert_summary or f"{alert_name} on {alert_service}",
+        labels=json.loads(alert_labels),
     )
     build_server(LiveAdapters.from_settings(), actions_enabled=actions, incident=inc).run(
         transport="stdio"
@@ -285,6 +291,91 @@ def incident_show(incident_id: str) -> None:
             f"  root cause {ok(truth['root_cause_ok'])}  culprit named {ok(truth['culprit_ok'])}  "
             f"fix {ok(truth['fix_ok'])}"
         )
+
+
+demo_app = typer.Typer(
+    help="The demo stack: a real containerised system to break and let the agent fix."
+)
+app.add_typer(demo_app, name="demo")
+
+DEMO_ENV = {
+    "ADAPTER_BACKEND": "live",
+    "ACTUATOR": "demo",
+    "REDIS_URL": "redis://localhost:6380/0",
+    "LIVE_TOPOLOGY_FILE": "demo/state/topology.json",
+    "LIVE_DEPLOY_LOG": "demo/state/deploys.json",
+    "LIVE_FLAG_FILE": "demo/state/flags.json",
+    "VERIFY_TIMEOUT_S": "300",
+}
+
+
+def _stack():
+    from pager_zero.demo import DemoStack
+
+    return DemoStack(settings.demo_dir, "redis://localhost:6380/0")
+
+
+@demo_app.command("up")
+def demo_up(
+    no_reset: bool = typer.Option(False, "--no-reset", help="Keep demo/state as is."),
+) -> None:
+    """Build + start shop-api, worker, loadgen, Redis, Redpanda, Postgres, Prometheus, Alertmanager."""
+    st = _stack()
+    console.print("building and starting the demo stack (first time: ~1–2 min)…")
+    st.up(reset=not no_reset)
+    ok = st.wait_healthy()
+    console.print(st.ps())
+    console.print(
+        "[green]shop-api healthy[/green]" if ok else "[red]shop-api not healthy yet[/red]"
+    )
+    console.print(
+        "\nNow serve Pager-Zero against it (Alertmanager pages http://localhost:8000):\n"
+        "  [bold]make demo-serve[/bold]      (= "
+        + " ".join(f"{k}={v}" for k, v in DEMO_ENV.items())
+        + " uv run pz serve)\n"
+        "then break something:  [bold]uv run pz demo chaos bad-deploy[/bold]\n"
+        "Prometheus http://localhost:9090 · Alertmanager http://localhost:9093 · shop-api http://localhost:8010"
+    )
+
+
+@demo_app.command("down")
+def demo_down(volumes: bool = typer.Option(False, "-v", help="Also delete data volumes.")) -> None:
+    """Stop the demo stack."""
+    _stack().down(volumes=volumes)
+    console.print("demo stack stopped")
+
+
+@demo_app.command("status")
+def demo_status() -> None:
+    """Containers + current knobs (version, fault toggles)."""
+    st = _stack()
+    console.print(st.ps())
+    console.print({k: v for k, v in st.read_env().items()})
+
+
+@demo_app.command("chaos")
+def demo_chaos(
+    fault: str = typer.Argument(
+        ..., help="bad-deploy | flag-regression | cache-eviction | consumer-lag | downstream-outage"
+    ),
+) -> None:
+    """Really break the running stack. Alertmanager will page `pz serve` within ~1–2 minutes."""
+    from pager_zero.demo import FAULTS
+
+    if fault not in FAULTS:
+        console.print(f"[red]unknown fault {fault!r}[/red]; one of {', '.join(FAULTS)}")
+        raise typer.Exit(code=2)
+    console.print(f"[bold red]chaos[/bold red] {_stack().chaos(fault)}")
+    console.print(
+        "[dim]watch http://localhost:9090/alerts — the alert fires after the `for:` window, then the incident appears in the UI[/dim]"
+    )
+
+
+@demo_app.command("heal")
+def demo_heal() -> None:
+    """Undo every fault (healthy version, default flags, 64mb cache, 3 fast workers, payments up)."""
+    for line in _stack().heal():
+        console.print(f"  ✓ {line}")
 
 
 memory_app = typer.Typer(help="Incident memory (pgvector).")

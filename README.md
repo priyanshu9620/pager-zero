@@ -164,7 +164,8 @@ pz approve <id> | pz reject <id>           resume: execute + verify, or stop
 pz incident list | show <id>
 pz memory init | search "<text>" | count
 pz bench --n 20 --seed 7 [--families a,b] [--memory] [--pause s]
-pz serve [--port 8000]                     FastAPI (docs at /docs)
+pz serve [--host 0.0.0.0 --port 8000]      FastAPI (docs at /docs)
+pz demo up | down | status | chaos <fault> | heal     the real demo stack (demo/README.md)
 ```
 
 ## Web approval console
@@ -196,6 +197,24 @@ claude mcp add pager-zero -- uv --directory $PWD run pz mcp serve --scenario hot
 ```
 Then: *"Call incident_context and find the root cause."* Mutating tools appear only with `--actions`.
 
+## Demo stack: break a real system
+
+The synthetic world is a benchmark. To watch the agent work on something that is actually
+broken, [`demo/`](demo/README.md) ships a small **real** system — a FastAPI service on Postgres +
+Redis, a Kafka consumer group on Redpanda, a load generator, Prometheus and Alertmanager — and a
+chaos command that does real damage:
+
+```bash
+uv run pz demo up                     # 9 containers
+make demo-serve                       # pz serve against the live adapters, real actuator
+uv run pz demo chaos bad-deploy       # or flag-regression | cache-eviction | consumer-lag | downstream-outage
+```
+
+~1–2 minutes later Alertmanager pages Pager-Zero, a ⚡ live incident appears in the UI, the agent
+investigates through Prometheus / Kafka / Redis / the deploy log, proposes a fix, and on approval
+**really** rolls the container back (or rescales the group, or `CONFIG SET`s Redis) — and
+verification watches the real p99 come down. Nothing in the agent knows what you broke.
+
 ## Live backend
 
 `ADAPTER_BACKEND=live` swaps the synthetic world for real sources through the same Protocols:
@@ -209,7 +228,8 @@ Then: *"Call incident_context and find the root cause."* Mutating tools appear o
 | scm | GitHub REST (commits, diffs) | `GITHUB_TOKEN`, repo per service in topology |
 | deploys / flags | JSON files your CI / flag service append to | `live/deploys.json`, `live/flags.json` |
 | topology | static JSON | `live/topology.json` (see `live/*.example.json`) |
-| actuator | **dry-run by default** — logs the action, changes nothing | `ACTUATOR_DRY_RUN=false` to opt in |
+| actuator | **dry-run by default** — logs the action, changes nothing | `ACTUATOR=demo` for the demo stack's real actuator |
+| verify | polls the key metric until it recovers or `VERIFY_TIMEOUT_S` elapses | `VERIFY_TIMEOUT_S=300` (0 = check once) |
 
 ```bash
 docker compose --profile live up -d      # prometheus :9090, redis :6380, redpanda :9092
@@ -221,7 +241,7 @@ ADAPTER_BACKEND=live REDIS_URL=redis://localhost:6380/0 \
 ## Development
 
 ```bash
-make test        # 62 tests, no API key needed (MEMORY_BACKEND=memory)
+make test        # 78 tests, no API key needed (MEMORY_BACKEND=memory)
 make lint
 PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
 ```
@@ -234,8 +254,8 @@ PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
   deploy and flag history are file-backed plug points, not integrations with a specific CI or flag
   service.
 - One alert → one incident → one fix. No multi-alert correlation yet.
-- Incidents are planted in a generated world, not caused in a running system. A demo stack with
-  real services, real Prometheus and chaos-injected faults through the live adapters is the next step.
+- The demo stack is tiny (one service, one worker) and its faults are the five the actuator can
+  undo; it proves the agent works on real telemetry, not that it generalises to your production.
 
 ## License
 

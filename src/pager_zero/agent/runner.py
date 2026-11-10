@@ -7,6 +7,7 @@ Graph checkpoints:       .pz/checkpoints.sqlite  (thread_id = incident id)
 from __future__ import annotations
 
 import json
+import os
 import random
 import sys
 import uuid
@@ -102,7 +103,7 @@ def public_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 def truth_check(meta: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
     """Planted ground truth vs what the agent concluded. Only once the incident is over."""
-    if meta.get("status") not in TERMINAL:
+    if meta.get("status") not in TERMINAL or meta.get("backend") == LIVE:
         return None
     from pager_zero.bench.scoring import culprit_named
     from pager_zero.synth import generate
@@ -124,20 +125,79 @@ def truth_check(meta: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] |
     }
 
 
+LIVE = "live"
+
+
+def new_live_incident(alert: dict[str, Any], memory: bool = True) -> dict[str, Any]:
+    """An incident on the live backend: no scenario, no seed, no ground truth — just the alert."""
+    iid = f"inc_{uuid.uuid4().hex[:8]}"
+    meta = {
+        "memory": memory,
+        "id": iid,
+        "backend": LIVE,
+        "scenario": LIVE,
+        "seed": None,
+        "blind": False,
+        "alert": {
+            "service": alert["service"],
+            "name": alert.get("name", "HighLatencyP99"),
+            "summary": alert.get("summary") or f"{alert.get('name')} on {alert['service']}",
+            "labels": alert.get("labels", {}),
+        },
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
+        "status": "created",
+        "provider": settings.llm_provider,
+        "model": settings.llm_model,
+        "world": None,
+    }
+    save_meta(meta)
+    return meta
+
+
+def open_live_incident(service: str, name: str) -> dict[str, Any] | None:
+    """The live incident already handling this (service, alert) if one is not finished."""
+    for m in list_incidents():
+        if m.get("backend") == LIVE and m["status"] not in TERMINAL:
+            a = m.get("alert", {})
+            if a.get("service") == service and a.get("name") == name:
+                return m
+    return None
+
+
 def _server_args(meta: dict[str, Any], actions: bool) -> list[str]:
-    args = [
-        "-m",
-        "pager_zero.cli",
-        "mcp",
-        "serve",
-        "--scenario",
-        meta["scenario"],
-        "--seed",
-        str(meta["seed"]),
-        "--state",
-        meta["world"],
-    ]
+    args = ["-m", "pager_zero.cli", "mcp", "serve"]
+    if meta.get("backend") == LIVE:
+        a = meta["alert"]
+        args += [
+            "--alert-service",
+            a["service"],
+            "--alert-name",
+            a["name"],
+            "--alert-summary",
+            a["summary"],
+            "--alert-labels",
+            json.dumps(a.get("labels", {})),
+        ]
+    else:
+        args += [
+            "--scenario",
+            meta["scenario"],
+            "--seed",
+            str(meta["seed"]),
+            "--state",
+            meta["world"],
+        ]
     return args + (["--actions"] if actions else [])
+
+
+def _server_env() -> dict[str, str]:
+    """Environment for the MCP subprocess.
+
+    The MCP SDK forwards only a minimal safe set (HOME, PATH, …) by default, which silently
+    dropped ADAPTER_BACKEND / REDIS_URL / LIVE_* — the server then read `.env` and served a
+    synthetic world while the incident claimed to be live (P-26). Forward everything.
+    """
+    return dict(os.environ)
 
 
 def _client(meta: dict[str, Any], actions: bool) -> MultiServerMCPClient:
@@ -147,6 +207,7 @@ def _client(meta: dict[str, Any], actions: bool) -> MultiServerMCPClient:
                 "transport": "stdio",
                 "command": sys.executable,
                 "args": _server_args(meta, actions),
+                "env": _server_env(),
             }
         }
     )
@@ -177,7 +238,12 @@ async def _graph(meta: dict[str, Any], llm, trace):
         settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
         async with AsyncSqliteSaver.from_conn_string(str(settings.checkpoint_db)) as saver:
             graph = build_graph(
-                llm, read_tools, executor, max_steps=settings.max_steps, recall=recall
+                llm,
+                read_tools,
+                executor,
+                max_steps=settings.max_steps,
+                recall=recall,
+                verify_timeout_s=settings.verify_timeout_s if meta.get("backend") == LIVE else 0,
             ).compile(checkpointer=saver)
             yield graph
 

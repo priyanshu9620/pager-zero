@@ -15,6 +15,7 @@ from rich.table import Table
 from pager_zero.agent.runner import new_incident, resume, run_until_approval
 from pager_zero.bench.scoring import Score, score
 from pager_zero.config import settings
+from pager_zero.errors import root_cause
 from pager_zero.synth import generate, list_scenarios
 
 RESULTS_DIR = Path("bench/results")
@@ -23,20 +24,6 @@ RESULTS_DIR = Path("bench/results")
 def plan_incidents(n: int, seed: int, families: list[str] | None) -> list[tuple[str, int]]:
     fams = families or list_scenarios()
     return [(fams[i % len(fams)], seed * 1000 + i) for i in range(n)]
-
-
-def _root_cause(e: BaseException) -> BaseException:
-    """Unwrap ExceptionGroups / chained exceptions to the innermost real error."""
-    seen = 0
-    while seen < 20:
-        seen += 1
-        if isinstance(e, BaseExceptionGroup) and e.exceptions:
-            e = e.exceptions[0]
-        elif e.__cause__ is not None:
-            e = e.__cause__
-        else:
-            return e
-    return e
 
 
 async def run_one(scenario: str, inc_seed: int, memory: bool) -> Score:
@@ -50,7 +37,7 @@ async def run_one(scenario: str, inc_seed: int, memory: bool) -> Score:
             state = await resume(meta, {"decision": "approve", "note": "bench auto-approve"}, quiet)
         return score(scenario, inc_seed, meta, gt, state, time.time() - t0)
     except Exception as e:  # noqa: BLE001 — a crash is a failed incident, not a failed bench
-        err = f"{type(e).__name__}: {str(_root_cause(e))[:300]}"
+        err = f"{type(e).__name__}: {str(root_cause(e))[:300]}"
         return score(
             scenario,
             inc_seed,

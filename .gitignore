@@ -13,3 +13,4 @@ wheels/
 live/topology.json
 live/deploys.json
 live/flags.json
+demo/state/
