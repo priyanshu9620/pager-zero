@@ -35,6 +35,7 @@
   .fire .hint{color:var(--muted);font-size:12px;line-height:1.5}.fire .hint b{color:var(--text);font-weight:600}
   .fire details{display:grid;gap:8px}.fire summary{cursor:pointer;color:var(--dim);font-size:12.5px;list-style:none}.fire summary::before{content:"▸ "}.fire details[open] summary::before{content:"▾ "}
   .blind{color:var(--mag)}
+  .live{color:var(--warn)}
   .truth .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .truth .col h4{margin:0 0 6px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:700}
   .truth .fam{font-size:16px;font-weight:600}
@@ -172,8 +173,12 @@ function seriesSummary(s){
 }
 
 function resultSummary(tool, raw){
+  try { return summarise(tool, raw); } catch(e){ console.warn('summary failed for', tool, e); return ''; }
+}
+function summarise(tool, raw){
   const d = tryJson(raw);
-  if(!d) return '';
+  if(!d || typeof d !== 'object') return '';
+  if('diff' in d && 'sha' in d){ return `<div class="summary"><div class="kv">commit <b>${esc(d.sha)}</b> · ${d.diff ? `${d.diff.split('\n').length} diff lines` : `<span class="muted">${esc(d.note || 'no diff')}</span>`}</div></div>`; }
   if(Array.isArray(d.items) && d.items.length && 'last' in d.items[0]) return d.items.slice(0,4).map(seriesSummary).join('');
   if('last' in d) return seriesSummary(d);
   if(d.top_messages){ return `<div class="summary"><div class="kv"><b>${d.total_matches}</b> matching lines${d.top_messages[0]?` · top: <span style="color:var(--text)">“${esc(d.top_messages[0].message).slice(0,110)}”</span> ×${d.top_messages[0].count}`:''}</div></div>`; }
@@ -183,7 +188,8 @@ function resultSummary(tool, raw){
   if('value' in d && 'key' in d){ return `<div class="summary"><div class="kv"><b>${esc(d.key)}</b> = <b>${esc(j(d.value))}</b></div></div>`; }
   if(d.alert){ return `<div class="summary"><div class="kv">${esc(d.alert.name)} on <b>${esc(d.alert.service)}</b> · ${esc(d.services?.length||0)} services</div></div>`; }
   if(d.version && d.dependencies){ return `<div class="summary"><div class="kv">version <b>${esc(d.version)}</b> · deps ${esc((d.dependencies||[]).join(', '))||'—'} · groups ${esc((d.consumer_groups||[]).join(', '))||'—'} · caches ${esc((d.caches||[]).join(', '))||'—'}</div></div>`; }
-  const keys = Object.keys(d); if(keys.length && d[keys[0]] && 'last' in d[keys[0]]) return keys.slice(0,4).map(k => seriesSummary({...d[k], metric: k})).join('');
+  const keys = Object.keys(d), first = keys.length ? d[keys[0]] : null;
+  if(first && typeof first === 'object' && 'last' in first) return keys.slice(0,4).map(k => seriesSummary({...d[k], metric: k})).join('');
   return '';
 }
 
@@ -225,9 +231,14 @@ function pipeline(inc){
 async function loadHealth(){ try{ const h = await api('/healthz'); $('#health').innerHTML = `<span>model <b>${esc(h.llm)}</b></span><span>backend <b>${esc(h.backend)}</b></span><span>memory <b>${esc(h.memory)}</b></span>`; }catch(e){ $('#health').innerHTML = '<span class="err">API unreachable</span>'; } }
 async function loadScenarios(){ const s = await api('/scenarios'); $('#scenario').innerHTML = s.map(x => `<option ${x==='bad-deploy'?'selected':''}>${esc(x)}</option>`).join(''); }
 
-const label = m => m.scenario === 'hidden'
+const label = m => m.backend === 'live'
+  ? `<span class="live">⚡ ${esc(m.alert?.name)}</span> <small>on ${esc(m.alert?.service)}</small>`
+  : m.scenario === 'hidden'
   ? `<span class="blind">🎲 blind incident</span> <small>hidden until over</small>`
   : `${m.blind ? '🎲 ' : ''}${esc(m.scenario)} <small>#${esc(m.seed)}</small>`;
+const origin = inc => inc.backend === 'live'
+  ? `<span class="live">live system</span> · paged by Alertmanager`
+  : inc.scenario === 'hidden' ? '<span class="blind">scenario hidden until the incident is over</span>' : `${esc(inc.scenario)} #${esc(inc.seed)}`;
 
 async function loadList(){
   const list = (await api('/incidents')).slice().reverse();
@@ -261,7 +272,7 @@ async function render(){
     <div class="alert">
       <div class="top">
         <div><h2>${spinning}${a ? `${esc(a.name)} on <span class="svc">${esc(a.service)}</span>` : esc(inc.id)}</h2>
-        <div class="sub">${a ? `${esc(a.summary)} · fired ${fmtT(a.fired_at)} · ` : ''}<code>${esc(inc.id)}</code> · ${inc.scenario === 'hidden' ? '<span class="blind">scenario hidden until the incident is over</span>' : `${esc(inc.scenario)} #${esc(inc.seed)}`} · ${esc(inc.model)}${inc.error ? ` · <span class="err">${esc(inc.error)}</span>` : ''}</div></div>
+        <div class="sub">${a ? `${esc(a.summary)} · fired ${fmtT(a.fired_at)} · ` : ''}<code>${esc(inc.id)}</code> · ${origin(inc)} · ${esc(inc.model)}${inc.error ? ` · <span class="err">${esc(inc.error)}</span>` : ''}</div></div>
         ${pill(inc.status)}
       </div>
       ${pipeline(inc)}
@@ -291,12 +302,13 @@ async function render(){
   const t = inc.truth;
   if(t){
     const mark = (ok, txt) => `<span class="${ok?'ok':'no'}">${ok?'✔':'✘'} ${txt}</span>`;
-    html += `<div class="card truth"><h3>Ground truth <span class="cnt">${inc.blind ? 'was hidden from you and the agent · ' : ''}revealed: ${esc(t.scenario)} #${esc(t.seed)}</span></h3>
+    const revealed = t.sealed ? 'sealed fault from <code>pz demo chaos random</code> — nobody was told' : `revealed: ${esc(t.scenario)} #${esc(t.seed)}`;
+    html += `<div class="card truth"><h3>${t.sealed ? 'What was actually broken' : 'Ground truth'} <span class="cnt">${inc.blind ? 'was hidden from you and the agent · ' : ''}${revealed}</span></h3>
       <div class="row2">
         <div class="col"><h4>Planted</h4><div class="fam">${esc(t.planted.family)}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(t.planted.cause)}</p><div class="mono muted">${esc(t.planted.fix.action)}(${esc(Object.entries(t.planted.fix.target).map(([k,v])=>`${k}=${j(v)}`).join(', '))})</div></div>
         <div class="col"><h4>Agent concluded</h4><div class="fam">${esc(d?.family ?? '—')}</div><p class="muted" style="margin:6px 0 8px;font-size:13px">${esc(d?.root_cause ?? 'no diagnosis')}</p><div class="mono muted">${p ? `${esc(p.action)}(${esc(Object.entries(p.target||{}).map(([k,v])=>`${k}=${j(v)}`).join(', '))})` : 'no fix proposed'}</div></div>
       </div>
-      <div class="marks">${mark(t.root_cause_ok,'root cause family')}${mark(t.culprit_ok,'culprit named')}${mark(t.fix_ok,'fix matches')}${v ? mark(v.recovered,'recovery verified') : ''}</div></div>`;
+      <div class="marks">${mark(t.root_cause_ok,'root cause family')}${t.culprit_ok === null ? '' : mark(t.culprit_ok,'culprit named')}${mark(t.fix_ok, t.sealed ? 'right fix action' : 'fix matches')}${v ? mark(v.recovered,'recovery verified') : ''}</div></div>`;
   }
   $('#detail').innerHTML = html;
   document.querySelectorAll('.toggle').forEach(el => el.onclick = () => { const id = el.dataset.raw; openRaw.has(id) ? openRaw.delete(id) : openRaw.add(id); render(); });

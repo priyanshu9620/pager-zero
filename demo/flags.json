@@ -1,0 +1,7 @@
+{
+  "values": {
+    "shop.offer_cache.ttl_seconds": 300,
+    "shop.fallback_payments.enabled": false
+  },
+  "history": []
+}

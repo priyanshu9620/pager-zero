@@ -239,3 +239,26 @@ def test_new_incident_random_is_blind_and_hidden(tmp_path, monkeypatch):
 
     explicit = runner.new_incident("bad-deploy", 42)
     assert not explicit["blind"] and runner.public_meta(explicit)["seed"] == 42
+
+
+def test_mcp_subprocess_gets_full_environment_and_live_args(monkeypatch):
+    from pager_zero.agent import runner
+
+    monkeypatch.setenv("ADAPTER_BACKEND", "live")
+    monkeypatch.setenv("PZ_MARKER", "1")
+    assert runner._server_env()["ADAPTER_BACKEND"] == "live"
+    assert runner._server_env()["PZ_MARKER"] == "1"
+    live = {
+        "backend": "live",
+        "alert": {
+            "service": "shop-api",
+            "name": "HighLatencyP99",
+            "summary": "s",
+            "labels": {"x": "y"},
+        },
+    }
+    args = runner._server_args(live, actions=True)
+    assert "--alert-service" in args and "shop-api" in args and args[-1] == "--actions"
+    assert "--scenario" not in args
+    synth = {"scenario": "bad-deploy", "seed": 3, "world": "w.pkl"}
+    assert "--scenario" in runner._server_args(synth, actions=False)

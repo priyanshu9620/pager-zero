@@ -31,6 +31,9 @@ inc_526d0985 → resolved
 
 Everything above ran on a **free** `gemini-3.5-flash-lite` key. Swap the model with two lines in `.env`.
 
+**New here?** [`docs/GUIDE.md`](docs/GUIDE.md) is the full manual: prerequisites, every command,
+what each UI panel means, the demo stack, pointing it at your own infra, troubleshooting.
+
 **Not convinced it isn't rigged?** Fire a *blind* incident: `pz incident fire` (no `-s`) or the 🎲
 button in the UI picks the failure family and seed server-side and hides both from you *and* the
 agent until the incident is over — then shows the planted truth next to what the agent concluded,
@@ -148,7 +151,11 @@ uv run pz approve <incident id>
 | Google AI Studio | `google_genai` | `gemini-3.5-flash` | free; stronger, ~5–11 s/turn |
 | Anthropic | `anthropic` | `claude-opus-5-5` | paid |
 | Groq | `groq` | `openai/gpt-oss-120b` | free tier's 8k tokens/min is too small for a 12-step agent |
-| Ollama | `ollama` | `qwen2.5:14b` | local, no key |
+| Ollama | `ollama` | `qwen2.5:14b` | local, **no key, no quota**; ~2 min per incident on an M4 Pro; solved a blind `downstream-outage` 3/3 but missed a live `bad-deploy` (declined to guess) |
+
+Free cloud tiers are counted in **requests/day** (Gemini: 500 per model) or **tokens/day** (Groq:
+200k); one investigation is 7–15 requests, so a heavy day of testing exhausts them by afternoon.
+Ollama is the way out when that happens — same agent, same tools, two lines of config.
 
 Only tool calling, plain text and Pydantic structured output are used, so anything LangChain's
 `init_chat_model` supports should work.
@@ -164,7 +171,8 @@ pz approve <id> | pz reject <id>           resume: execute + verify, or stop
 pz incident list | show <id>
 pz memory init | search "<text>" | count
 pz bench --n 20 --seed 7 [--families a,b] [--memory] [--pause s]
-pz serve [--port 8000]                     FastAPI (docs at /docs)
+pz serve [--host 0.0.0.0 --port 8000]      FastAPI (docs at /docs)
+pz demo up | down | status | chaos <fault> | heal     the real demo stack (demo/README.md)
 ```
 
 ## Web approval console
@@ -196,6 +204,30 @@ claude mcp add pager-zero -- uv --directory $PWD run pz mcp serve --scenario hot
 ```
 Then: *"Call incident_context and find the root cause."* Mutating tools appear only with `--actions`.
 
+## Demo stack: break a real system
+
+The synthetic world is a benchmark. To watch the agent work on something that is actually
+broken, [`demo/`](demo/README.md) ships a small **real** system — a FastAPI service on Postgres +
+Redis, a Kafka consumer group on Redpanda, a load generator, Prometheus and Alertmanager — and a
+chaos command that does real damage:
+
+```bash
+uv run pz demo up                     # 9 containers
+make demo-serve                       # pz serve against the live adapters, real actuator
+uv run pz demo chaos                  # random + sealed — or name one: bad-deploy | flag-regression | cache-eviction | consumer-lag | downstream-outage
+```
+
+~1–2 minutes later Alertmanager pages Pager-Zero, a ⚡ live incident appears in the UI, the agent
+investigates through Prometheus / Kafka / Redis / the deploy log, proposes a fix, and on approval
+**really** rolls the container back (or rescales the group, or `CONFIG SET`s Redis) — and
+verification watches the real p99 come down. Nothing in the agent knows what you broke — and
+with a sealed random fault, neither do you until the incident closes and the card reveals it.
+
+Measured run (2026-11-10, `gemini-3.5-flash-lite`): deploy injected at T+0 → p99 24 → 495 ms by
+T+20 s → alert fired T+75 s → incident opened T+85 s → diagnosis `bad-deploy v1.5.0`,
+`rollback_deploy(shop-api, v1.4.0)` at T+125 s (7 tool calls) → approved → container rolled back →
+`http_p99_ms peak 495.0 → now 23.7 (baseline 23.7)` 60 s later → **resolved**.
+
 ## Live backend
 
 `ADAPTER_BACKEND=live` swaps the synthetic world for real sources through the same Protocols:
@@ -209,7 +241,8 @@ Then: *"Call incident_context and find the root cause."* Mutating tools appear o
 | scm | GitHub REST (commits, diffs) | `GITHUB_TOKEN`, repo per service in topology |
 | deploys / flags | JSON files your CI / flag service append to | `live/deploys.json`, `live/flags.json` |
 | topology | static JSON | `live/topology.json` (see `live/*.example.json`) |
-| actuator | **dry-run by default** — logs the action, changes nothing | `ACTUATOR_DRY_RUN=false` to opt in |
+| actuator | **dry-run by default** — logs the action, changes nothing | `ACTUATOR=demo` for the demo stack's real actuator |
+| verify | polls the key metric until it recovers or `VERIFY_TIMEOUT_S` elapses | `VERIFY_TIMEOUT_S=300` (0 = check once) |
 
 ```bash
 docker compose --profile live up -d      # prometheus :9090, redis :6380, redpanda :9092
@@ -221,7 +254,7 @@ ADAPTER_BACKEND=live REDIS_URL=redis://localhost:6380/0 \
 ## Development
 
 ```bash
-make test        # 62 tests, no API key needed (MEMORY_BACKEND=memory)
+make test        # 78 tests, no API key needed (MEMORY_BACKEND=memory)
 make lint
 PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
 ```
@@ -234,8 +267,8 @@ PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
   deploy and flag history are file-backed plug points, not integrations with a specific CI or flag
   service.
 - One alert → one incident → one fix. No multi-alert correlation yet.
-- Incidents are planted in a generated world, not caused in a running system. A demo stack with
-  real services, real Prometheus and chaos-injected faults through the live adapters is the next step.
+- The demo stack is tiny (one service, one worker) and its faults are the five the actuator can
+  undo; it proves the agent works on real telemetry, not that it generalises to your production.
 
 ## License
 

@@ -1,0 +1,82 @@
+# Pager-Zero demo stack: a real (tiny) system to break and let the agent fix.
+#   uv run pz demo up        builds + starts everything, writes demo/state/*
+#   uv run pz demo chaos …   does real damage; Alertmanager pages `pz serve`
+# Runtime knobs come from demo/state/state.env (written by `pz demo`), not from this file.
+name: pager-zero-demo
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  extra_hosts: ["host.docker.internal:host-gateway"]
+
+services:
+  shop-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: shop, POSTGRES_PASSWORD: shop, POSTGRES_DB: shop }
+    ports: ["5433:5432"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U shop"], interval: 3s, retries: 20 }
+
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["6380:6379"]
+
+  redpanda:
+    image: redpandadata/redpanda:v24.3.3
+    ports: ["9092:9092"]
+    command:
+      - redpanda start --overprovisioned --smp 1 --memory 512M --reserve-memory 0M --node-id 0 --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+
+  shop-api:
+    <<: *app
+    command: ["uvicorn", "shop_api:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "warning"]
+    environment:
+      APP_VERSION: ${SHOP_VERSION:-v1.4.0}
+      SLOW_QUERY: ${SHOP_SLOW_QUERY:-0}
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://shop:shop@shop-db:5432/shop
+      PAYMENTS_URL: http://payments-mock:8001
+      FLAGS_FILE: /state/flags.json
+    volumes: ["./state:/state"]
+    ports: ["8010:8000"]
+    depends_on: { shop-db: { condition: service_healthy } }
+
+  payments-mock:
+    <<: *app
+    command: ["uvicorn", "payments_mock:app", "--host", "0.0.0.0", "--port", "8001", "--log-level", "warning"]
+
+  worker:
+    <<: *app
+    command: ["python", "worker.py"]
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:29092
+      WORKER_SLEEP_MS: ${WORKER_SLEEP_MS:-5}
+    depends_on: [redpanda]
+    deploy: { replicas: 3 }
+
+  loadgen:
+    <<: *app
+    command: ["python", "loadgen.py"]
+    environment: { KAFKA_BOOTSTRAP: redpanda:29092, SHOP_URL: http://shop-api:8000 }
+    depends_on: [shop-api, redpanda]
+
+  exporter:
+    <<: *app
+    command: ["python", "exporter.py"]
+    environment: { KAFKA_BOOTSTRAP: redpanda:29092, REDIS_URL: redis://redis:6379/0 }
+    depends_on: [redpanda, redis]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./rules.yml:/etc/prometheus/rules.yml:ro
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    ports: ["9093:9093"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]

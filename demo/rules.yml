@@ -1,0 +1,39 @@
+# Recording rules give the agent the same metric names the synthetic world uses
+# (http_p99_ms, db_qps, cache_hit_rate, dependency_error_rate, consumer lag) — so the
+# agent, the MCP tools and the verify step are identical across backends.
+groups:
+  - name: pager-zero-recording
+    interval: 5s
+    rules:
+      - record: http_p99_ms
+        expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket[1m]))) * 1000
+      - record: request_rate
+        expr: sum by (service) (rate(http_requests_total[1m]))
+      - record: http_error_rate
+        expr: sum by (service) (rate(http_requests_total{status=~"5.."}[1m])) / sum by (service) (rate(http_requests_total[1m]))
+      - record: db_qps
+        expr: sum by (service) (rate(db_queries_total[1m]))
+      - record: cache_hit_rate
+        expr: sum by (service, cache) (rate(cache_hits_total[1m])) / (sum by (service, cache) (rate(cache_hits_total[1m])) + sum by (service, cache) (rate(cache_misses_total[1m])))
+      - record: dependency_error_rate
+        expr: sum by (service, dependency) (rate(dependency_requests_total{outcome="error"}[1m])) / sum by (service, dependency) (rate(dependency_requests_total[1m]))
+      - record: cache_evictions_per_s
+        expr: sum by (instance) (rate(redis_evicted_keys_total[1m]))
+
+  - name: pager-zero-alerts
+    rules:
+      - alert: HighLatencyP99
+        expr: http_p99_ms{service="shop-api"} > 400
+        for: 45s
+        labels: { severity: high }
+        annotations: { summary: "{{ $labels.service }} p99 > 400ms for 45s (now {{ $value | printf \"%.0f\" }}ms)" }
+      - alert: HighErrorRate
+        expr: http_error_rate{service="shop-api"} > 0.2
+        for: 45s
+        labels: { severity: high }
+        annotations: { summary: "{{ $labels.service }} 5xx rate > 20% for 45s" }
+      - alert: ConsumerLagHigh
+        expr: kafka_consumergroup_lag_sum > 300
+        for: 45s
+        labels: { severity: high, service: order-worker, group: "{{ $labels.consumergroup }}" }
+        annotations: { summary: "{{ $labels.consumergroup }} lag > 300 for 45s (now {{ $value }})" }

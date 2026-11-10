@@ -1,0 +1,13 @@
+route:
+  receiver: pager-zero
+  group_by: [alertname, service]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 2h
+
+receivers:
+  - name: pager-zero
+    webhook_configs:
+      # `pz serve` on the laptop; host.docker.internal resolves to the host on Docker Desktop
+      - url: http://host.docker.internal:8000/webhooks/alertmanager
+        send_resolved: false

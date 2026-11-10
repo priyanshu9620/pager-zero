@@ -171,3 +171,32 @@ async def test_blind_incident_hides_then_reveals(client, monkeypatch):
             real["scenario"] == "cache-eviction"
             and t["planted"]["fix"]["target"]["name"] == "offer-cache"
         )
+
+
+async def test_alertmanager_live_ingress_and_dedupe(client, monkeypatch):
+    from pager_zero.config import AdapterBackend, settings
+
+    monkeypatch.setattr(settings, "adapter_backend", AdapterBackend.live)
+    _fake_runner(monkeypatch, {"status": "awaiting_approval"}, {"status": "resolved"})
+    alert = {
+        "status": "firing",
+        "labels": {"alertname": "HighLatencyP99", "service": "shop-api", "severity": "high"},
+        "annotations": {"summary": "shop-api p99 > 400ms"},
+    }
+    async with client as c:
+        r = await c.post("/webhooks/alertmanager", json={"status": "firing", "alerts": [alert]})
+        assert r.status_code == 202 and len(r.json()["created"]) == 1
+        iid = r.json()["created"][0]
+        meta = runner.load_meta(iid)
+        assert meta["backend"] == "live" and meta["alert"]["service"] == "shop-api"
+        assert meta["alert"]["summary"] == "shop-api p99 > 400ms"
+        await _settle()
+        # the same alert again while the incident is open → not a second incident
+        r = await c.post("/webhooks/alertmanager", json={"status": "firing", "alerts": [alert]})
+        assert r.json()["created"] == [] and r.json()["already_open"] == [iid]
+        got = (await c.get(f"/incidents/{iid}")).json()
+        assert got["scenario"] == "live" and got["truth"] is None
+        # no service label → 400
+        bad = {**alert, "labels": {"alertname": "X"}}
+        r = await c.post("/webhooks/alertmanager", json={"status": "firing", "alerts": [bad]})
+        assert r.status_code == 400

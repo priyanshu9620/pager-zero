@@ -56,14 +56,22 @@ class Settings(BaseSettings):
     actuator_dry_run: bool = Field(
         True, description="Live actuator only logs actions unless explicitly False"
     )
+    actuator: str = Field(
+        "dry-run",
+        description="dry-run | demo — `demo` really mutates the demo stack (containers, Redis, flags)",
+    )
+    demo_dir: Path = Path("demo")
+    verify_timeout_s: int = Field(
+        0,
+        description="Live systems recover over minutes: re-check the key metric every 15 s up to "
+        "this long before declaring not-recovered. 0 = check once (synthetic worlds heal instantly).",
+    )
 
     # --- storage ---
     database_url: str = "postgresql+psycopg://pz:pz@localhost:5432/pagerzero"
     checkpoint_db: Path = Path(".pz/checkpoints.sqlite")
     trace_dir: Path = Path(".pz/traces")
     embedding_model: str = "all-MiniLM-L6-v2"
-    memory_backend: str = Field("pgvector", description="pgvector | memory | off")
-    recall_k: int = 3
     memory_backend: str = Field("pgvector", description="pgvector | memory | off")
     recall_k: int = 3
 

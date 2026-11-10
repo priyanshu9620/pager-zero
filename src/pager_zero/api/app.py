@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,10 @@ from rich.console import Console
 from pager_zero import __version__
 from pager_zero.agent import runner
 from pager_zero.config import settings
+from pager_zero.errors import describe, full_trace
 from pager_zero.synth import list_scenarios
+
+log = logging.getLogger("pager_zero.api")
 
 app = FastAPI(
     title="Pager-Zero",
@@ -34,7 +38,8 @@ def root() -> RedirectResponse:
 @app.get("/ui", include_in_schema=False)
 def ui() -> FileResponse:
     """The approval console: fire incidents, watch the investigation, approve or reject."""
-    return FileResponse(STATIC / "index.html")
+    # single-file UI that changes often: never let the browser serve a stale copy
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
 _quiet = Console(quiet=True)
@@ -97,20 +102,25 @@ def _view(meta: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _fail(meta: dict[str, Any], e: BaseException) -> None:
+    meta["status"], meta["error"] = "error", describe(e)
+    runner.save_meta(meta)
+    (Path(runner.INCIDENTS_DIR) / meta["id"] / "error.txt").write_text(full_trace(e))
+    log.error("incident %s failed: %s", meta["id"], meta["error"])
+
+
 async def _run_bg(meta: dict[str, Any]) -> None:
     try:
         await runner.run_until_approval(meta, _quiet)
     except Exception as e:  # noqa: BLE001
-        meta["status"], meta["error"] = "error", f"{type(e).__name__}: {str(e)[:300]}"
-        runner.save_meta(meta)
+        _fail(meta, e)
 
 
 async def _resume_bg(meta: dict[str, Any], decision: dict[str, Any]) -> None:
     try:
         await runner.resume(meta, decision, _quiet)
     except Exception as e:  # noqa: BLE001
-        meta["status"], meta["error"] = "error", f"{type(e).__name__}: {str(e)[:300]}"
-        runner.save_meta(meta)
+        _fail(meta, e)
 
 
 def _spawn(meta: dict[str, Any], coro: Any) -> None:
@@ -193,10 +203,12 @@ async def reject(incident_id: str, body: Decision | None = None) -> dict[str, An
 async def alertmanager(payload: AlertmanagerPayload, background: BackgroundTasks) -> dict[str, Any]:
     """Alertmanager webhook ingress.
 
-    With the synthetic backend the alert must carry `pz_scenario` (and optionally `pz_seed`) labels
-    so we know which world to build. A live backend (phase 7) would instead pass the alert through.
+    Synthetic backend: the alert must carry `pz_scenario` (and optionally `pz_seed`) labels so we
+    know which world to build. Live backend: the alert is passed through as-is (`service`,
+    `alertname`, `summary`); a second notification for an alert already being handled is ignored.
     """
-    created = []
+    created: list[str] = []
+    deduped: list[str] = []
     for alert in payload.alerts:
         if alert.status != "firing":
             continue
@@ -206,7 +218,29 @@ async def alertmanager(payload: AlertmanagerPayload, background: BackgroundTasks
                 raise HTTPException(
                     400, "synthetic backend needs a `pz_scenario` label on the alert"
                 )
-            raise HTTPException(501, "live alert ingress not implemented yet")
+            service = alert.labels.get("service")
+            name = alert.labels.get("alertname", "HighLatencyP99")
+            if not service:
+                raise HTTPException(400, "live alert needs a `service` label")
+            if existing := runner.open_live_incident(service, name):
+                deduped.append(existing["id"])
+                continue
+            meta = runner.new_live_incident(
+                {
+                    "service": service,
+                    "name": name,
+                    "summary": alert.annotations.get("summary", ""),
+                    "labels": alert.labels,
+                }
+            )
+            meta["status"] = "investigating"
+            meta["source"] = {
+                "alertmanager": {"labels": alert.labels, "annotations": alert.annotations}
+            }
+            runner.save_meta(meta)
+            _spawn(meta, _run_bg(meta))
+            created.append(meta["id"])
+            continue
         if scenario not in list_scenarios():
             raise HTTPException(400, f"unknown pz_scenario {scenario!r}")
         seed = int(alert.labels.get("pz_seed", "1"))
@@ -218,4 +252,4 @@ async def alertmanager(payload: AlertmanagerPayload, background: BackgroundTasks
         runner.save_meta(meta)
         _spawn(meta, _run_bg(meta))
         created.append(meta["id"])
-    return {"created": created}
+    return {"created": created, "already_open": deduped}

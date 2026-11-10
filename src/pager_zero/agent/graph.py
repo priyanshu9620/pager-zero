@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -66,6 +68,8 @@ def build_graph(
     *,
     max_steps: int = 12,
     recall: Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]] | None = None,
+    verify_timeout_s: int = 0,
+    verify_poll_s: int = 15,
 ):
     tools_by_name = {t.name: t for t in read_tools}
     llm_with_tools = llm.bind_tools(read_tools)
@@ -168,9 +172,7 @@ def build_graph(
         result = await executor(plan["action"], plan["target"])
         return {"execution": result}
 
-    async def verify(state: AgentState) -> AgentState:
-        alert = state["context"]["alert"]
-        metric, labels = _key_metric(alert)
+    async def _check_once(metric: str, labels: dict[str, str]) -> Verification:
         if metric == "consumer_lag":
             hist = await _call(
                 tools_by_name, "lag_history", {"group": labels["group"], "minutes": 60}
@@ -183,7 +185,7 @@ def build_graph(
             series = out.get("items", []) if isinstance(out, dict) else out
         s = series[0] if series else None
         if not s or not s.get("points"):
-            v = Verification(
+            return Verification(
                 metric=metric,
                 labels=labels,
                 before=0,
@@ -192,19 +194,37 @@ def build_graph(
                 recovered=False,
                 note="no data",
             )
-        else:
-            before, after, baseline = s["max"], s["last"], s["first"]
-            tol = 2.0 if metric == "consumer_lag" else 1.5
-            recovered = after <= max(baseline * tol, baseline + 1e-9) and after < before * 0.5
-            v = Verification(
-                metric=metric,
-                labels=labels,
-                before=before,
-                after=after,
-                baseline=baseline,
-                recovered=recovered,
-                note=f"{metric} peak {before:.1f} → now {after:.1f} (baseline {baseline:.1f})",
-            )
+        before, after, baseline = s["max"], s["last"], s["first"]
+        tol = 2.0 if metric == "consumer_lag" else 1.5
+        recovered = after <= max(baseline * tol, baseline + 1e-9) and after < before * 0.5
+        return Verification(
+            metric=metric,
+            labels=labels,
+            before=before,
+            after=after,
+            baseline=baseline,
+            recovered=recovered,
+            note=f"{metric} peak {before:.1f} → now {after:.1f} (baseline {baseline:.1f})",
+        )
+
+    async def verify(state: AgentState) -> AgentState:
+        """Code, not the model, decides whether the fix worked.
+
+        A synthetic world heals instantly; a live system takes minutes (rate windows, restarts),
+        so with `verify_timeout_s > 0` we re-check every `verify_poll_s` until recovered or timed out.
+        """
+        metric, labels = _key_metric(state["context"]["alert"])
+        t0 = time.monotonic()
+        waited = 0
+        while True:
+            v = await _check_once(metric, labels)
+            elapsed = time.monotonic() - t0
+            if v.recovered or elapsed >= verify_timeout_s:
+                break
+            waited += 1
+            await asyncio.sleep(verify_poll_s)
+        if waited:
+            v.note += f" · watched {int(time.monotonic() - t0)} s"
         return {
             "verification": v.model_dump(),
             "status": "resolved" if v.recovered else "unresolved",

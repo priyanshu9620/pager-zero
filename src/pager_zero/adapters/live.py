@@ -485,6 +485,12 @@ class LiveAdapters:
         topo = StaticTopology(settings.live_topology_file, prom)
         flags = FileFlagStore(settings.live_flag_file, topo)
         deploys = FileDeployLog(settings.live_deploy_log)
+        actuator: Any = DryRunActuator(flags, deploys, dry_run=settings.actuator_dry_run)
+        if settings.actuator == "demo":
+            from pager_zero.demo import DemoStack
+            from pager_zero.demo.actuator import DemoActuator
+
+            actuator = DemoActuator(DemoStack(settings.demo_dir, settings.redis_url))
         return Adapters(
             metrics=prom,
             logs=LokiLogs(settings.loki_url),
@@ -495,12 +501,16 @@ class LiveAdapters:
             deploys=deploys,
             flags=flags,
             topology=topo,
-            actuator=DryRunActuator(flags, deploys, dry_run=settings.actuator_dry_run),
+            actuator=actuator,
         )
 
 
 def live_incident(
-    service: str, name: str, summary: str, window_minutes: int = 45
+    service: str,
+    name: str,
+    summary: str,
+    window_minutes: int = 45,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     return {
@@ -512,8 +522,9 @@ def live_incident(
             "severity": "high",
             "fired_at": (now - timedelta(minutes=3)).isoformat(timespec="seconds"),
             "summary": summary,
-            "labels": {},
+            "labels": labels or {},
         },
-        "now": now.isoformat(timespec="seconds"),
+        # no "now": a live system's clock is the wall clock. Pinning it here froze every query
+        # window at server start, so verify could never observe the recovery (P-31).
         "window_minutes": window_minutes,
     }
