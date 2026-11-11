@@ -1,6 +1,6 @@
 # CLAUDE.md — pager-zero
 
-Personal resume project of Priyanshu Gupta. **Not a Meesho repo.**
+Personal resume project of Priyanshu Gupta. **Not a my employer repo.**
 
 ## Start here
 User-facing manual (setup, commands, UI, demo stack, troubleshooting): `docs/GUIDE.md` — keep it current.
