@@ -4,7 +4,7 @@ sync:
 	uv sync
 
 test:
-	MEMORY_BACKEND=memory uv run pytest -q -p no:warnings
+	MEMORY_BACKEND=memory LANGSMITH_TRACING=false uv run pytest -q -p no:warnings   # tests never trace
 
 lint:
 	uv run ruff check src tests
