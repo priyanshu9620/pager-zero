@@ -83,3 +83,7 @@ Newest first. One block per working session.
   ```
   Until then, Claude pushes with the one-off token-header command from P-5.
 - **Next:** Phase 1 — `adapters/base.py` Protocols, `synth/world.py`, six scenario generators, `adapters/synthetic.py`, `pz world show`.
+
+## 2026-11-11 — LangSmith tracing wired (opt-in)
+- `LANGSMITH_TRACING/API_KEY/PROJECT` in `.env` (project `pager-zero`), `.env.example`, `docs/GUIDE.md` "Tracing with LangSmith", README "Observability", `pz doctor` shows the tracing row. LangGraph traces every run automatically; no code path changes.
+- Verified the wiring end-to-end: a `pz incident fire` reached api.smith.langchain.com — and got **429 "Monthly unique traces usage limit exceeded"**: the LangSmith workspace (shared with the tripmate project) has used this month's free 5k traces. Traces will store once the month resets, or with a fresh workspace/key. Nothing else to change.

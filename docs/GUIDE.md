@@ -264,3 +264,27 @@ tests/              81 tests (make test)
 .pz/                runtime state: incidents/, checkpoints.sqlite   (gitignored)
 docs/GUIDE.md       this file
 ```
+
+## Tracing with LangSmith (optional)
+
+Every agent run can be recorded as a trace tree: each LLM call with its exact prompt and response, every
+tool call with inputs/outputs, latency, tokens and cost per step. LangGraph picks this up from the
+environment — no code path changes:
+
+```
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...        # smith.langchain.com → Settings → API keys (free tier: 5k traces/month)
+LANGSMITH_PROJECT=pager-zero
+```
+
+`pz doctor` shows `tracing  LangSmith ✔ project pager-zero` when it is on. Then open
+https://smith.langchain.com → project *pager-zero*: one root run per incident (`pz incident fire`,
+`pz approve`, the webhook path, `pz bench`), expandable to the node → LLM → tool level.
+
+What it is for here:
+- debugging a wrong decision: open the failed incident's trace and read the prompt that produced it;
+- cost/latency per model: the Gemini vs Groq vs Ollama comparison with real token counts;
+- regression: save bench scenarios as a LangSmith dataset and re-run them after a prompt change.
+
+Traces leave the laptop (synthetic incidents only — nothing sensitive). Leave the three variables unset to
+run fully offline; nothing else changes.

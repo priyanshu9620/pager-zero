@@ -53,6 +53,9 @@ def doctor(
     t.add_row("api key", key_status)
     t.add_row("adapter backend", settings.adapter_backend.value)
     t.add_row("max steps", str(settings.max_steps))
+    # LangSmith tracing is picked up by LangGraph/LangChain straight from the environment
+    tracing_on = os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and bool(os.environ.get("LANGSMITH_API_KEY"))
+    t.add_row("tracing", f"LangSmith ✔ project {os.environ.get('LANGSMITH_PROJECT', 'default')}" if tracing_on else "off (set LANGSMITH_TRACING/API_KEY)")
     console.print(t)
 
     if not key_present:

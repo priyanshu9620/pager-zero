@@ -259,6 +259,11 @@ make lint
 PZ_TEST_PG=1 uv run pytest tests/test_memory.py   # with docker compose up
 ```
 
+## Observability
+
+Set `LANGSMITH_TRACING=true` + an API key and every run is a LangSmith trace (prompts, tool calls,
+tokens, latency per step) — see `docs/GUIDE.md`. Off by default; the project works fully offline without it.
+
 ## Limitations (honest list)
 
 - The benchmark is synthetic and small (20). It catches regressions when prompts change; it is not
